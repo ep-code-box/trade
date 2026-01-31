@@ -1,0 +1,30 @@
+# Environments
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project Specific
+# 외부 참조용 (본인 코드 아님)
+open-trading-api-main/
+TrendHunter_AI/charts/
+TrendHunter_AI/outputs/
+kis_token.json
+
+# Databases (Users should build their own)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+TrendHunter_AI/db/

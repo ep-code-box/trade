@@ -1,0 +1,49 @@
+"""RS 점수 계산 후 daily_analysis 최신일만 업데이트. 실행: python -m src.analysis.calc_rs_score"""
+import pandas as pd
+import numpy as np
+
+from src.db import get_connection
+
+
+def calc_rs_scores_flexible():
+    conn = get_connection()
+    print("DB에서 시세 데이터를 불러오는 중 (유연한 RS 계산)...")
+    df = pd.read_sql_query("SELECT date, code, close FROM daily_analysis ORDER BY code, date", conn)
+    if df.empty:
+        conn.close()
+        return
+
+    def get_rs_raw_score_flexible(series):
+        if len(series) < 60:
+            return -999.0
+        curr = series.iloc[-1]
+        m3_idx = max(0, len(series) - 63)
+        m6_idx = max(0, len(series) - 126)
+        m9_idx = max(0, len(series) - 189)
+        m12_idx = max(0, len(series) - 252)
+        r1 = (curr / series.iloc[m3_idx]) - 1
+        r2 = (curr / series.iloc[m6_idx]) - 1
+        r3 = (curr / series.iloc[m9_idx]) - 1
+        r4 = (curr / series.iloc[m12_idx]) - 1
+        return (r1 * 2) + r2 + r3 + r4
+
+    rs_results = []
+    for code, group in df.groupby("code"):
+        score = get_rs_raw_score_flexible(group["close"])
+        rs_results.append({"code": code, "raw_score": score})
+    rs_df = pd.DataFrame(rs_results)
+    valid_rs = rs_df[rs_df["raw_score"] > -900].copy()
+    valid_rs["rs_score"] = valid_rs["raw_score"].rank(pct=True) * 99
+    print("DB에 RS 점수 업데이트 중...")
+    cur = conn.cursor()
+    cur.execute("SELECT MAX(date) FROM daily_analysis")
+    max_date = cur.fetchone()[0]
+    for _, row in valid_rs.iterrows():
+        cur.execute("UPDATE daily_analysis SET rs_score = ? WHERE code = ? AND date = ?", (row["rs_score"], row["code"], max_date))
+    conn.commit()
+    conn.close()
+    print(f"RS 점수 재계산 및 업데이트 완료 (기준일: {max_date})")
+
+
+if __name__ == "__main__":
+    calc_rs_scores_flexible()
