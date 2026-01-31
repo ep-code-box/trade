@@ -1,55 +1,50 @@
-# Project Context: Trade (TrendHunter)
+# Project Context: TrendHunter
 
 ## Project Overview
-This project is a Python-based automated trading and market analysis system. It is designed to fetch all market data and execute trades using the **Korea Investment & Securities (한국투자증권 - "Hantu") API**.
+TrendHunter is a Python-based quantitative trading system optimized for the **Korea Investment & Securities (KIS)** API. It implements a strict rule-based investment strategy inherited from market legends like Jesse Livermore, William O'Neil, and Mark Minervini.
 
-## Core Technologies
-- **Language:** Python
-- **API:** Korea Investment & Securities (KIS) API
-- **Data Management:** SQLite (indicated by `.db` exclusions)
-- **Environment:** Python Virtual Environment (`.venv`)
+## Core Architecture (Refactored)
+The project follows a modular structure for maintainability and scalability:
+- `run.py`: Central CLI entry point for all operations.
+- `src/`: Core application logic.
+    - `auth.py`: KIS token management & production/sandbox URL handling.
+    - `kis_api.py`: Standardized API wrapper with rate limiting and error handling.
+    - `db/manager.py`: SQLite schema management (`stock_info.db`, `user_info.db`).
+    - `jobs/`: Data collection (Master parsing, Daily OHLCV, Dividend mining).
+    - `analysis/`: Quantitative logic (RS Score, VCP, Screening).
+- `TrendHunter/db/`: Persistent storage for market and user data.
 
-## Directory Structure
-- `TrendHunter/charts/`: Stores generated charts and visualizations.
-- `TrendHunter/outputs/`: Stores general output data.
-- `TrendHunter/db/`: Contains local SQLite databases for persistent storage.
+## Investment Strategy: The 3-Track System
 
-## Authentication & Secrets
-The project uses the following files for authentication, which are excluded from version control:
-- `.env`: Environment variables for sensitive configuration.
-- `kis_token.json`: Storage for the Korea Investment & Securities API access tokens.
+### 1. TRACK 1: Trend Following (Aggressive)
+*   **Target:** Market leaders within strong sectors (e.g., Robots, Semi-conductors).
+*   **Rules:** Mark Minervini's Trend Template (Stage 2 uptrend), VCP (Volatility Contraction Pattern), and Volume Dry-up.
+*   **Indicators:** RS Score (Flexible percentile rank), SMA(50/150/200), VCP Ratio (< 0.5).
 
-## Setup & Usage (Inferred)
-1. **Environment:** Create and activate a virtual environment (`python -m venv .venv`).
-2. **Configuration:** Set up the required KIS API keys in `.env` or relevant configuration files.
-3. **Execution:** The system likely runs through a main entry point.
+### 2. TRACK EX: Independent Momentum (Extra)
+*   **Target:** High-momentum stocks not belonging to any major theme.
+*   **Purpose:** Captures individual growth stories based purely on price/volume strength.
+
+### 3. TRACK 2: Toobuk Investment (Passive/Stability)
+*   **Target:** High-dividend blue-chip stocks.
+*   **Yield Goal:** Annualized yield > 5%.
+*   **Mining Logic:** 100% KIS-based mining of DPS, Dividend Cycles (Monthly/Quarterly/Annual), and Payout ratios.
+
+## Technical Implementation Details
+- **Master Data:** Parsed from KIS `.mst` files (77 fields) for deep fundamental context.
+- **Flexible RS:** Weighted calculation (recent 3 months weighted 40%) with percentile ranking across 3,800+ stocks.
+- **Smart Update:** Incremental daily OHLCV fetching with indicator recalculation using past 200 days of buffer data.
+- **Production API:** All critical data (Dividends, Fundamentals) is fetched via the Production Domain to ensure accuracy.
+
+## Operational Workflow
+1. `python3 run.py daily`: Sync latest market prices.
+2. `python3 run.py rs`: Recalculate relative strength rankings.
+3. `python3 run.py screen`: Generate the integrated investment report.
+
+## Future Roadmap
+- **GCP Deployment:** Migration to GCP e2-micro (Free Tier) for 24/7 operation.
+- **Telegram Integration:** Automated report delivery and remote account control.
+- **Automated Execution:** Rule-based buy/sell execution with server-side stop-losses.
 
 ---
-
-## Investment Strategy & Persona
-
-The system operates with a **2-Track Investment Strategy**, combining aggressive trend following with stable dividend investing.
-
-### Track 1: Trend Following (Aggressive Growth)
-*   **Successor to masters:** Jesse Livermore, William O'Neil, Mark Minervini, Nicolas Darvas, David Ryan, Mark Ritchie II, and Kim Dae-hyun (Super Ant).
-*   **Mission:** Strictly enforce trading principles based on quantitative rules and offer HTS/MTS specific guidance.
-*   **Principles:**
-    *   **Jesse Livermore:** Path of least resistance, pyramiding, strict stop-losses.
-    *   **William O'Neil:** CAN SLIM, chart patterns (Cup with Handle).
-    *   **Mark Minervini:** VCP (Volatility Contraction Pattern), SEPA.
-    *   **Nicolas Darvas:** Box Theory.
-
-### Track 2: Toobuk Investment (Passive Income & Stability)
-*   **Focus:** "Toobuk-i" (Slow & Steady walker) approach.
-*   **Target:** High-dividend blue-chip stocks (High Yield, Large Cap).
-*   **Goal:** Long-term stability and consistent cash flow via dividends.
-
-### Operational Guidelines
-
-#### 1. Korea Investment & Securities (Hantu) Focus
-*   **Platform:** All advice and execution are optimized for **Hantu HTS/MTS**.
-*   **Execution:** Utilize features like Conditional Search, Real-time Charts, and Reservation Orders.
-
-#### 2. Strict Feedback & Principles
-*   **Discipline:** Strictly detect and alert against impulsive trading (Noidong-maemae), averaging down (Multagi) in Track 1, or delaying stop-losses.
-
+**AI Mentor's Directive:** "Trust the data, enforce the rules, and ignore the noise. The system is the master."

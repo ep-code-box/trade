@@ -1,83 +1,64 @@
-# Database Design & Critical Review
+# Database Design & Technical Specification (Final)
 
-## 1. Proposed Schema Design
+## 1. Core Databases
 
-### A. `stock_info.db` (Market Data)
-Designed to store market-wide data, enabling quantitative technical analysis, screening, and backtesting.
+### A. `stock_info.db` (Market Intelligence)
+The primary data store for technical and fundamental analysis across 3,800+ stocks.
 
-#### 1. `master_info` (Stock Master)
-*   **Purpose:** The single source of truth for stock metadata.
+#### 1. `master_info` (Extended Stock Master)
+*   **Purpose:** Comprehensive metadata for every stock, parsed from KIS `.mst` files.
+*   **Key Columns (Total 77):**
+    *   `code` (PK), `name`, `market_type`: Core identifiers.
+    *   `bstp_larg_div_code`: Industry classification for sector analysis.
+    *   `per_stock_dvdn_amt`: Annualized Dividend Per Share (Reverse-engineered from yield/close).
+    *   `dividend_cycle`: Identified as 'Quarterly/Monthly', 'Semi-annual', or 'Annual'.
+    *   `dividend_count`: Number of dividend events in the past year.
+    *   `roe`, `sale_account`, `thtr_ntin`: Core fundamental metrics.
+    *   `updated_at`: Timestamp of the last metadata sync.
+
+#### 2. `daily_analysis` (Rich Time-Series Data)
+*   **Purpose:** Stores daily OHLCV and calculated quantitative indicators.
 *   **Columns:**
-    *   `code` (TEXT, PK): Standard ticker code (e.g., '005930').
-    *   `name` (TEXT): Stock name.
-    *   `market_type` (TEXT): Market classification (KOSPI, KOSDAQ).
-    *   `listing_date` (TEXT): IPO date (useful for "IPO base" patterns).
-    *   `is_active` (INTEGER): 1 if active, 0 if delisted.
-    *   `sector_code` (TEXT): Standard industry classification code (WICS).
-    *   `updated_at` (TEXT): Last sync timestamp.
+    *   `date`, `code` (Composite PK).
+    *   `open`, `high`, `low`, `close`, `volume`, `amount`: Raw market data.
+    *   `sma_20`, `sma_50`, `sma_150`, `sma_200`: Moving averages for Trend Template.
+    *   `volume_sma_50`: Volume moving average for Dry-up detection.
+    *   `rs_score`: Relative Strength percentile rank (1-99).
+    *   `vol_std_10d`, `vol_std_50d`: Volatility metrics for VCP detection (`vcp_ratio`).
+    *   `high_52w`, `low_52w`: Used for breakout signals.
+    *   `dividend_yield`: Dynamic yield based on daily closing price.
 
-#### 2. `sectors_themes` (Sector & Theme Mapping)
-*   **Purpose:** To group stocks for "Leading Sector" analysis based on quantitative strength.
-*   **Columns:**
-    *   `id` (INTEGER, PK, Auto-inc).
-    *   `code` (TEXT, FK): Link to `master_info`.
-    *   `category_type` (TEXT): 'SECTOR' (WICS) or 'THEME'.
-    *   `category_name` (TEXT): Name of the sector/theme.
-    *   `source` (TEXT): Origin of this classification.
-
-#### 3. `daily_analysis` (Daily Technical & Fundamental Metrics)
-*   **Purpose:** Time-series data for quantitative screening and trend analysis.
-*   **Columns:**
-    *   `date` (TEXT, PK).
-    *   `code` (TEXT, PK).
-    *   `close` (REAL): Adjusted closing price.
-    *   `volume` (INTEGER).
-    *   `sma_50` (REAL), `sma_150` (REAL), `sma_200` (REAL).
-    *   `rs_score` (REAL): Relative Strength score (0-100) vs Market Index.
-    *   `volatility_20d` (REAL): For VCP detection.
-    *   `dividend_yield_daily` (REAL).
+#### 3. `sectors_themes` (Relationship Mapping)
+*   **Purpose:** Maps stocks to WICS sectors and dynamic themes.
+*   **Source:** KIS `idxcode.mst` and `theme_code.mst`.
 
 ---
 
-### B. `user_info.db` (User & Portfolio)
-Designed to isolate sensitive user data and operational logs for principle auditing.
+### B. `user_info.db` (Portfolio & Audit)
+Manages user-specific data and enforces trading discipline.
 
-#### 1. `account_config`
-*   **Purpose:** Manage 2-Track strategies separately.
-*   **Columns:**
-    *   `account_no` (TEXT, PK): KIS account number.
-    *   `track_type` (TEXT): 'TREND' (Track 1) or 'DIVIDEND' (Track 2).
-    *   `target_ratio` (REAL): Asset allocation target.
-
-#### 2. `trade_history`
-*   **Purpose:** Record of execution.
-*   **Columns:**
-    *   `id` (INTEGER, PK).
-    *   `date` (TEXT).
-    *   `account_no` (TEXT).
-    *   `code` (TEXT).
-    *   `side` (TEXT): 'BUY' or 'SELL'.
-    *   `price` (REAL).
-    *   `qty` (INTEGER).
-    *   `strategy_tag` (TEXT): Logic triggered.
-
-#### 3. `audit_log` (Rule Enforcement Log)
-*   **Purpose:** To track adherence to quantitative rules.
-*   **Columns:**
-    *   `id` (INTEGER, PK).
-    *   `date` (TEXT).
-    *   `violation_type` (TEXT): 'STOP_LOSS_DELAY', 'IMPULSE_BUY'.
-    *   `severity` (TEXT).
-    *   `message` (TEXT): Detailed critique of the violation.
+*   **`account_config`:** 2-Track account segregation.
+*   **`trade_history`:** Execution records with strategy tags (e.g., 'VCP_BREAKOUT').
+*   **`audit_log`:** Logs violations of the 1% risk rule or mentor critiques.
 
 ---
 
-## 2. Critical Review
+## 2. Quantitative Algorithms
 
-### Strengths
-1.  **Rule-Based Objectivity:** By using quantitative metrics like RS Score and VCP Volatility, the system avoids subjective bias.
-2.  **Auditability:** Every trade is tagged with a strategy, and violations are logged for review.
+### 1. Flexible RS Score
+Calculated across all 3,800+ stocks using a weighted formula:
+*   `Score = (3m_Return * 2) + 6m_Return + 9m_Return + 12m_Return`
+*   Requires a minimum of 60 days of history to include new leaders.
 
-### Refined Action Plan
-1.  **Direct API Integration:** Focus on KIS API for raw data.
-2.  **Pure Quantitative Logic:** All screening logic will use mathematical definitions (e.g., Standard Deviation for VCP).
+### 2. VCP & Volume Dry-up
+*   `vcp_ratio = vol_std_10d / vol_std_50d` (Values < 0.5 indicate contraction).
+*   `dry_up = current_volume < (previous_volume * 0.6)`.
+
+### 3. Dividend Annualization
+*   DPS is aggregated from all dividend events within a 1-year window to handle quarterly/monthly payouts correctly.
+
+---
+
+## 3. Data Integrity Principles
+*   **Load then Filter:** All indicators are calculated and stored for all stocks. Filtering is done at the query level (Views/Direct SQL) to allow flexible strategy adjustments.
+*   **Full History Recalculation:** The `recalc` job ensures that moving averages and slopes are consistent across the entire 2-year history, eliminating "cold start" issues for slope analysis.
