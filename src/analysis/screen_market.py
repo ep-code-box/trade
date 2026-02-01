@@ -23,6 +23,7 @@ def get_trend_candidates_direct():
     # 1. Fundamental & Extension Filters Adjusted
     # - RS Score >= 80
     # - Perfect Alignment: Price > SMA20 > SMA50 > SMA150 > SMA200 (사용자 요청 반영)
+    # - VDU (Volume Dry Up): 거래량이 평균의 70% 미만으로 말라야 함 (폭풍 전야)
     query = f"""
     SELECT 
         d.date, d.code, m.name, m.market_type,
@@ -34,8 +35,9 @@ def get_trend_candidates_direct():
     JOIN master_info m ON d.code = m.code
     WHERE d.date = '{max_date}'
       AND d.amount >= 3000000000
-      -- [완전 정배열 조건 완화: 눌림목 허용]
-      AND d.close > d.sma_50 
+      -- [완전 정배열 조건: 추세의 정석]
+      AND d.close > d.sma_20 
+      AND d.sma_20 > d.sma_50 
       AND d.sma_50 > d.sma_150 
       AND d.sma_150 > d.sma_200
       -- [수정] NULL 방지 및 조건 복구
@@ -44,6 +46,8 @@ def get_trend_candidates_direct():
       AND d.rs_score >= 80
       AND (d.close / d.sma_200) < 2.0
       AND (d.vol_std_10d / d.vol_std_50d) < 0.9
+      -- [VDU 필터] 거래량 건조 (평균 거래량 미만, 눌림목 확인)
+      AND d.volume < d.volume_sma_50
       AND (
           (m.bsop_prfi > 0 AND m.thtr_ntin > 0) 
           OR 
@@ -56,7 +60,7 @@ def get_trend_candidates_direct():
     return df
 
 def get_tick_size(price):
-    """한국 주식 시장 호가 단위 계산 (KOSPI/KOSDAQ 통합 단순화)"""
+    """국내 주식 호가 단위 (KOSPI/KOSDAQ 통합)"""
     if price < 2000: return 1
     if price < 5000: return 5
     if price < 20000: return 10
@@ -65,40 +69,30 @@ def get_tick_size(price):
     if price < 500000: return 500
     return 1000
 
-def adjust_to_tick(price):
-    """가격을 호가 단위에 맞춰 올림 (Ceiling)"""
+def adjust_to_tick(price, method='up'):
+    """가격을 호가 단위에 맞춰 올림/내림"""
     tick = get_tick_size(price)
-    return ((int(price) + tick - 1) // tick) * tick
+    if method == 'up':
+        return ((int(price) // tick) + 1) * tick
+    else:
+        return (int(price) // tick) * tick
 
 def get_breakout_price(high_52w):
     """
     진입가 정밀 산정 (조준경 보정):
     1. 기본: 52주 신고가 + 2% (안전 마진)
-    2. 라운드 피겨(심리적 저항선) 돌파 보정:
-       - 계산된 가격이 '마의 벽(1만, 5만, 10만)' 바로 아래라면, 
-         벽을 확실히 넘는 가격으로 강제 상향.
-    3. 호가 단위(Tick) 정렬:
-       - 시장에 존재하지 않는 가격(예: 103,734원) 제거 -> 104,000원
+    2. 라운드 피겨(심리적 저항선) 돌파 보정
+    3. 호가 단위 보정 (무조건 올림)
     """
     target = high_52w * 1.02
     
     # [라운드 피겨 강제 돌파 로직]
-    # 저항선 바로 밑에서 매수하는 것을 방지하기 위해 목표가를 '벽 위'로 올림
-    
-    # 10만원 벽 (예: 98,000 ~ 99,900 -> 100,500)
-    if 98000 <= target < 100000: 
-        return 100500
-    # 5만원 벽 (예: 49,000 ~ 49,950 -> 50,500)
-    elif 49000 <= target < 50000: 
-        return 50500
-    # 1만원 벽 (예: 9,800 ~ 9,990 -> 10,100)
-    elif 9800 <= target < 10000: 
-        return 10100
-    # 5천원 벽 (예: 4,900 ~ 4,995 -> 5,050)
-    elif 4900 <= target < 5000: 
-        return 5050
+    if 98000 <= target < 100000: return 100500
+    elif 48000 <= target < 50000: return 50500
+    elif 9800 <= target < 10000: return 10100
+    elif 4900 <= target < 5000: return 5050
         
-    return adjust_to_tick(target)
+    return adjust_to_tick(target, 'up')
 
 def generate_full_report():
     print("=" * 60)
