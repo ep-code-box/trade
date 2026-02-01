@@ -60,9 +60,11 @@ def kis_get_raw(path: str, params: dict = None, tr_id: str = "", custtype: str =
     try:
         res = requests.get(url, headers=headers, params=params or {}, timeout=30)
         if res.status_code != 200:
+            print(f"HTTP Error {res.status_code}: {res.text}")
             return None
         return res.json()
-    except Exception:
+    except Exception as e:
+        print(f"Exception: {e}")
         return None
 
 
