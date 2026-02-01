@@ -5,7 +5,10 @@
 명령 없이 실행 시 사용 가능한 명령 목록 출력.
 """
 import sys
+import warnings
 
+# Suppress annoying SSL warnings on macOS/LibreSSL
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL 1.1.1+")
 
 COMMANDS = {
     "init": "DB 테이블 생성 → python -m src.db.manager",

@@ -33,11 +33,16 @@ def update_db(code, data):
     try:
         per = float(data.get("per", 0.0) or 0.0)
         pbr = float(data.get("pbr", 0.0) or 0.0)
+        eps = float(data.get("eps", 0.0) or 0.0)
+        bps = float(data.get("bps", 0.0) or 0.0)
         market_cap = int(data.get("hts_avls", 0) or 0) * 100_000_000
+        
+        # Update daily_analysis
         cur.execute(
-            "UPDATE daily_analysis SET market_cap = ? WHERE code = ? AND date = (SELECT MAX(date) FROM daily_analysis WHERE code = ?)",
-            (market_cap, code, code),
+            "UPDATE daily_analysis SET market_cap = ?, eps = ?, bps = ? WHERE code = ? AND date = (SELECT MAX(date) FROM daily_analysis WHERE code = ?)",
+            (market_cap, eps, bps, code, code),
         )
+        # Update master_info
         cur.execute("UPDATE master_info SET per = ?, pbr = ? WHERE code = ?", (per, pbr, code))
     except Exception:
         pass

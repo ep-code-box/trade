@@ -111,6 +111,7 @@ def init_dbs():
             high_52w INTEGER, low_52w INTEGER, rs_score REAL,
             vol_std_10d REAL, vol_std_50d REAL, dividend_yield REAL,
             volume_sma_50 REAL,
+            eps REAL, bps REAL, revenue_growth REAL, eps_growth REAL, operating_margin REAL,
             PRIMARY KEY (date, code)
         )
     ''')
