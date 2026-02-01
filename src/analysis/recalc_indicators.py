@@ -35,9 +35,10 @@ def recalc_all():
     df['vol_std_50d'] = group['close'].transform(lambda x: x.rolling(window=50).std())
     
     # 3. 신고가/신저가 (전체 히스토리 기반)
-    print("52주 신고가/신저가 계산 중...")
-    df['high_52w'] = group['close'].transform(lambda x: x.rolling(window=250, min_periods=1).max())
-    df['low_52w'] = group['close'].transform(lambda x: x.rolling(window=250, min_periods=1).min())
+    # [최종] 장중 고가(High)가 있으면 사용하고, 없으면 종가(Close)를 백업으로 사용
+    print("52주 신고가(High 우선)/신저가(Low 우선) 재계산 중...")
+    df['high_52w'] = df['high'].fillna(df['close']).groupby(df['code']).transform(lambda x: x.rolling(window=250, min_periods=1).max())
+    df['low_52w'] = df['low'].fillna(df['close']).groupby(df['code']).transform(lambda x: x.rolling(window=250, min_periods=1).min())
 
     # 4. DB 덮어쓰기 (전체 삭제 후 재생성)
     print("DB에 무결점 데이터 저장 중 (수 분이 소요될 수 있습니다)...")
@@ -55,4 +56,4 @@ def recalc_all():
         conn.close()
 
 if __name__ == "__main__":
-    recalc_all_history()
+    recalc_all()

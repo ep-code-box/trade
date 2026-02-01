@@ -64,13 +64,18 @@ def process_and_save(code, data_list):
 
     new_dates = df["date"].tolist()
     save_df = full_df[full_df["date"].isin(new_dates)].copy()
+    
+    # [수정] DB 저장 전 code 컬럼 추가 필수
+    save_df["code"] = code
+    
     db_df = save_df[
         [
-            "date", "close", "volume", "amount", "sma_20", "sma_50", "sma_150", "sma_200",
-            "high_52w", "low_52w", "rs_score", "vol_std_10d", "vol_std_50d", "dividend_yield", "volume_sma_50",
+            "date", "code", "open", "high", "low", "close", "volume", "amount", 
+            "sma_20", "sma_50", "sma_150", "sma_200",
+            "high_52w", "low_52w", "rs_score", "vol_std_10d", "vol_std_50d", 
+            "dividend_yield", "volume_sma_50",
         ]
     ].copy()
-    db_df["code"] = code
     db_df["market_cap"] = None
 
     try:

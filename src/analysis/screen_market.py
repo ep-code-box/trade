@@ -34,11 +34,12 @@ def get_trend_candidates_direct():
     JOIN master_info m ON d.code = m.code
     WHERE d.date = '{max_date}'
       AND d.amount >= 3000000000
-      -- [완전 정배열 조건 강화]
-      AND d.close > d.sma_20 
-      AND d.sma_20 > d.sma_50 
+      -- [완전 정배열 조건 완화: 눌림목 허용]
+      AND d.close > d.sma_50 
       AND d.sma_50 > d.sma_150 
       AND d.sma_150 > d.sma_200
+      -- [수정] NULL 방지 및 조건 복구
+      AND d.high_52w IS NOT NULL
       AND d.close >= d.high_52w * 0.85
       AND d.rs_score >= 80
       AND (d.close / d.sma_200) < 2.0
