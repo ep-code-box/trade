@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 from src.config import ROOT
-from src.db import get_connection, init_dbs
+from src.db import get_connection, init_db
 
 
 def parse_kospi_mst_official(file_path):
@@ -102,7 +102,17 @@ def save_to_db(df, market_type):
     }
     df_db = df.rename(columns=mapping)
     df_db["market_type"] = market_type
-    df_db["updated_at"] = datetime.now().strftime("%Y-%m-%d")
+    df_db["updated_at"] = datetime.now().strftime("%Y%m%d")
+
+    # [v3.4] ROE 데이터 클렌징 (날짜 접두어 제거)
+    if 'roe' in df_db.columns:
+        def clean_roe(val):
+            try:
+                s = str(val).strip()
+                if len(s) > 6: return float(s[6:]) # 앞 6자리(YYYYMM) 제거
+                return float(s)
+            except: return 0.0
+        df_db['roe'] = df_db['roe'].apply(clean_roe)
 
     conn = get_connection()
     cur = conn.cursor()
@@ -115,8 +125,8 @@ def save_to_db(df, market_type):
     print(f"Saved {len(df_db)} {market_type} records.")
 
 
-if __name__ == "__main__":
-    init_dbs()
+def main():
+    init_db()
     conn = get_connection()
     conn.execute("DELETE FROM master_info")
     conn.commit()
@@ -124,3 +134,6 @@ if __name__ == "__main__":
 
     parse_kospi_mst_official(os.path.join(ROOT, "kospi_code.mst"))
     parse_kosdaq_mst_official(os.path.join(ROOT, "kosdaq_code.mst"))
+
+if __name__ == "__main__":
+    main()

@@ -34,15 +34,25 @@ def calc_rs_scores_flexible():
     rs_df = pd.DataFrame(rs_results)
     valid_rs = rs_df[rs_df["raw_score"] > -900].copy()
     valid_rs["rs_score"] = valid_rs["raw_score"].rank(pct=True) * 99
-    print("DB에 RS 점수 업데이트 중...")
+    print(f"계산된 RS 점수(유효) 개수: {len(valid_rs)}")
+    if len(valid_rs) == 0:
+        print("RS 점수 계산 실패: 유효한 데이터가 없습니다.")
+        return
+
     cur = conn.cursor()
     cur.execute("SELECT MAX(date) FROM daily_analysis")
     max_date = cur.fetchone()[0]
+
+    print(f"DB에 RS 점수 업데이트 중... (기준일: {max_date})")
+    
+    updated_count = 0
     for _, row in valid_rs.iterrows():
         cur.execute("UPDATE daily_analysis SET rs_score = ? WHERE code = ? AND date = ?", (row["rs_score"], row["code"], max_date))
+        updated_count += cur.rowcount
+        
     conn.commit()
     conn.close()
-    print(f"RS 점수 재계산 및 업데이트 완료 (기준일: {max_date})")
+    print(f"RS 점수 재계산 및 업데이트 완료 (총 {updated_count}건 업데이트됨)")
 
 
 if __name__ == "__main__":

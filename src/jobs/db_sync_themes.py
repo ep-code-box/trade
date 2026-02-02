@@ -75,8 +75,16 @@ def sync_themes(file_path):
     print(f"Synced {count} theme mappings.")
 
 
-if __name__ == "__main__":
+def main():
+    conn = get_connection()
+    conn.execute("DELETE FROM sectors_themes")
+    conn.commit()
+    conn.close()
+
     sector_file = download_and_extract("idxcode.mst.zip", "idxcode.mst")
     sync_sectors(sector_file)
     theme_file = download_and_extract("theme_code.mst.zip", "theme_code.mst")
     sync_themes(theme_file)
+
+if __name__ == "__main__":
+    main()

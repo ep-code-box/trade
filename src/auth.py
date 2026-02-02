@@ -21,14 +21,19 @@ else:
 REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
 
 TOKEN_FILE = os.path.join(ROOT, "kis_token.json")
-
+_cached_token = None # 메모리 캐시
 
 def get_access_token():
-    """Access Token 발급 및 로컬 저장."""
+    """Access Token 발급 및 메모리/로컬 저장."""
+    global _cached_token
+    if _cached_token:
+        return _cached_token
+
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE, "r", encoding="utf-8") as f:
             token_data = json.load(f)
-            return token_data.get("access_token")
+            _cached_token = token_data.get("access_token")
+            return _cached_token
 
     url = f"{BASE_URL}/oauth2/tokenP"
     headers = {"content-type": "application/json"}

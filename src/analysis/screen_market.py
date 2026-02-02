@@ -147,14 +147,25 @@ def generate_full_report():
     print(f"[{status_str}] {indices}")
 
     raw_df = get_trend_candidates_db()
+    print("\n[🔍 주도주 필터링 깔때기]")
+    print(f"   1. 후보군 (RS 80+ & 정배열): {len(raw_df)}개")
+    
     final_list = []
+    chart_pass = 0
+    supply_pass = 0
+    
     if not raw_df.empty:
         for _, row in raw_df.iterrows():
             if check_chart_pattern(row['code']):
+                chart_pass += 1
                 quality = get_supply_quality(row['code'])
                 if "이탈" not in quality:
+                    supply_pass += 1
                     row['quality'] = quality
                     final_list.append(row)
+    
+    print(f"   2. 차트 패턴 통과 (Tightness): {chart_pass}개")
+    print(f"   3. 수급 질적 분석 통과 (매집): {supply_pass}개")
     
     if final_list:
         save_to_trade_plan(final_list)
@@ -195,7 +206,17 @@ def generate_full_report():
     res = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()
     if res and res[0]:
         max_date = res[0]
-        query_div = f"SELECT DISTINCT m.code, m.name, d.dividend_yield, m.roe FROM daily_analysis d JOIN master_info m ON d.code = m.code WHERE d.date = '{max_date}' AND d.dividend_yield >= 7.0 AND m.thtr_ntin > 0 AND m.roe >= 10.0 ORDER BY d.dividend_yield DESC LIMIT 3"
+        # [v3.4] 배당 상한선(25%) 및 ROE 상한선(100%) 추가하여 데이터 오류 방지
+        query_div = f"""
+            SELECT DISTINCT m.code, m.name, d.dividend_yield, m.roe 
+            FROM daily_analysis d 
+            JOIN master_info m ON d.code = m.code 
+            WHERE d.date = '{max_date}' 
+              AND d.dividend_yield BETWEEN 7.0 AND 25.0 
+              AND m.thtr_ntin > 0 
+              AND m.roe BETWEEN 10.0 AND 100.0
+            ORDER BY d.dividend_yield DESC LIMIT 3
+        """
         div_df = pd.read_sql_query(query_div, conn)
         print(f"\n[🛡️ TRACK 2: 고배당파킹]")
         for _, row in div_df.iterrows():
