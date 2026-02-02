@@ -25,6 +25,7 @@ const TemplateDot: React.FC<{ active: boolean; index: number }> = ({ active, ind
 
 const Screener: React.FC<ScreenerProps> = ({ stocks, trackName, basket, onToggleBasket }) => {
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
+  const isDividendTrack = trackName.includes('뚜벅이') || trackName.includes('TRACK 2');
 
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
@@ -33,7 +34,9 @@ const Screener: React.FC<ScreenerProps> = ({ stocks, trackName, basket, onToggle
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
             {trackName}
           </h2>
-          <p className="text-slate-400 text-sm mt-1 font-medium">손익비가 검증된 상위 리더 목록</p>
+          <p className="text-slate-400 text-sm mt-1 font-medium">
+            {isDividendTrack ? '안정적인 현금흐름을 창출하는 고배당 우량주' : '손익비가 검증된 상위 리더 목록'}
+          </p>
         </div>
       </div>
 
@@ -46,13 +49,22 @@ const Screener: React.FC<ScreenerProps> = ({ stocks, trackName, basket, onToggle
                   <tr>
                     <th className="px-6 py-5">Target</th>
                     <th className="px-6 py-5">Ticker</th>
-                    <th className="px-6 py-5 text-center">RS</th>
-                    <th className="px-6 py-5 text-center">Template</th>
+                    {isDividendTrack ? (
+                      <>
+                        <th className="px-6 py-5 text-center">Yield</th>
+                        <th className="px-6 py-5 text-center">ROE</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-6 py-5 text-center">RS</th>
+                        <th className="px-6 py-5 text-center">Template</th>
+                      </>
+                    )}
                     <th className="px-6 py-5 text-right">Price</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {stocks.sort((a,b) => b.rsScore - a.rsScore).map((stock) => (
+                  {stocks.sort((a,b) => isDividendTrack ? (b.dividendYield || 0) - (a.dividendYield || 0) : b.rsScore - a.rsScore).map((stock) => (
                     <tr 
                       key={stock.symbol} 
                       className={`transition-all group cursor-pointer ${selectedStock?.symbol === stock.symbol ? 'bg-blue-600/10' : 'hover:bg-blue-600/5'}`}
@@ -75,16 +87,31 @@ const Screener: React.FC<ScreenerProps> = ({ stocks, trackName, basket, onToggle
                           <span className="font-bold text-white text-md group-hover:text-blue-400">{stock.name}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-5 text-center">
-                        <span className="font-mono font-bold text-blue-400">{stock.rsScore}</span>
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="flex justify-center gap-1">
-                          {(Object.entries(stock.template) as [string, boolean][]).slice(0, 4).map(([key, value], idx) => (
-                            <TemplateDot key={key} active={value} index={idx + 1} />
-                          ))}
-                        </div>
-                      </td>
+                      
+                      {isDividendTrack ? (
+                        <>
+                          <td className="px-6 py-5 text-center">
+                            <span className="font-mono font-bold text-emerald-400">{(stock.dividendYield || 0).toFixed(1)}%</span>
+                          </td>
+                          <td className="px-6 py-5 text-center">
+                            <span className="font-mono font-bold text-slate-300">{(stock as any).roe || 10}%</span>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-6 py-5 text-center">
+                            <span className="font-mono font-bold text-blue-400">{stock.rsScore.toFixed(0)}</span>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="flex justify-center gap-1">
+                              {(Object.entries(stock.template) as [string, boolean][]).slice(0, 4).map(([key, value], idx) => (
+                                <TemplateDot key={key} active={value} index={idx + 1} />
+                              ))}
+                            </div>
+                          </td>
+                        </>
+                      )}
+
                       <td className="px-6 py-5 text-right">
                         <p className="font-mono text-white font-bold">₩{stock.price.toLocaleString()}</p>
                         <p className={`text-xs font-bold ${stock.change >= 0 ? 'text-green-500' : 'text-red-500'}`}>

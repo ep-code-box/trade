@@ -70,9 +70,10 @@ export interface StockData {
   sma200: number;
   sma150: number;
   sma50: number;
-  track: TrackType;
+  track: TrackType | string;
   dividendYield?: number;
-  payoutRatio?: number;
+  roe?: number;
+  opMargin?: number;
   volumeDryUp: boolean;
   isStage2: boolean;
   sector: string;
@@ -123,6 +124,8 @@ export interface MarketSummary {
   activeLeaders: number;
   stage2Ratio: number;
   lastSync: string;
+  topSector?: string;
+  riskLevel?: string;
 }
 
 export interface MentorInsight {

@@ -14,18 +14,39 @@ def calc_rs_scores_flexible():
         return
 
     def get_rs_raw_score_flexible(series):
-        if len(series) < 60:
-            return -999.0
+        if len(series) < 60: return -999.0
         curr = series.iloc[-1]
-        m3_idx = max(0, len(series) - 63)
-        m6_idx = max(0, len(series) - 126)
-        m9_idx = max(0, len(series) - 189)
-        m12_idx = max(0, len(series) - 252)
-        r1 = (curr / series.iloc[m3_idx]) - 1
-        r2 = (curr / series.iloc[m6_idx]) - 1
-        r3 = (curr / series.iloc[m9_idx]) - 1
-        r4 = (curr / series.iloc[m12_idx]) - 1
-        return (r1 * 2) + r2 + r3 + r4
+        count = len(series)
+        
+        # [v9.5] 데이터 기간별 존재 여부 확인 후 동적 비중 적용
+        score = 0
+        total_weight = 0
+        
+        # 3개월 (필수)
+        m3 = max(0, count - 63)
+        score += ((curr / series.iloc[m3]) - 1) * 2
+        total_weight += 2
+        
+        # 6개월
+        if count >= 126:
+            m6 = count - 126
+            score += (curr / series.iloc[m6]) - 1
+            total_weight += 1
+            
+        # 9개월
+        if count >= 189:
+            m9 = count - 189
+            score += (curr / series.iloc[m9]) - 1
+            total_weight += 1
+            
+        # 12개월
+        if count >= 252:
+            m12 = count - 252
+            score += (curr / series.iloc[m12]) - 1
+            total_weight += 1
+            
+        # 비중 정규화 (가중치 합계가 5가 되도록 보정)
+        return score * (5.0 / total_weight)
 
     rs_results = []
     for code, group in df.groupby("code"):

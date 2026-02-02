@@ -5,6 +5,7 @@ import pandas as pd
 import sqlite3
 import os
 from datetime import datetime
+from collections import Counter
 from src.db import get_connection
 
 app = FastAPI(title="TrendHunter API Server")
@@ -42,87 +43,129 @@ def get_trade_plan():
     """
     return get_db_row_dict(query)
 
+@app.get("/api/summary")
+def get_market_summary():
+    """시장 전체 분석 요약 정보 반환 (미리 계산된 테이블 활용)"""
+    try:
+        conn = get_connection()
+        # 가장 최근 요약 정보 조회
+        query = "SELECT * FROM market_summary ORDER BY date DESC LIMIT 1"
+        res = conn.execute(query).fetchone()
+        conn.close()
+        
+        if not res:
+            return {"error": "No summary data found"}
+            
+        return {
+            "stage2Ratio": res[3],
+            "activeLeaders": res[2],
+            "marketRS": res[4],
+            "topSector": res[1],
+            "riskLevel": res[5],
+            "lastSync": res[0]
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/api/stocks")
 def get_stock_analysis():
-    """스크리너 결과 및 주요 지표 반환 (프론트엔드 형식에 최적화)"""
-    # 1. 가장 최근 날짜 확인
-    conn = get_connection()
-    res = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()
-    if not res or not res[0]:
+    """스크리너 결과 반환"""
+    try:
+        conn = get_connection()
+        query = """
+            SELECT 
+                t.code as symbol, t.name, t.track, t.rs_score as rsScore, t.vcp_ratio as vcpRatio,
+                t.entry_price as price, t.stop_price as stopLossPrice, t.weight, t.rationale,
+                d.close as curr_price, d.open, d.high_52w, d.dividend_yield as dividendYield,
+                m.roe, m.bsop_prfi, m.thtr_ntin, m.sale_account, m.stck_fcam
+            FROM trade_plan t
+            LEFT JOIN (
+                SELECT * FROM daily_analysis 
+                WHERE date = (SELECT MAX(date) FROM daily_analysis)
+            ) d ON t.code = d.code
+            LEFT JOIN master_info m ON t.code = m.code
+            WHERE t.date = (SELECT MAX(date) FROM trade_plan)
+            ORDER BY t.rs_score DESC
+        """
+        df = pd.read_sql_query(query, conn)
+        df = df.replace([float('inf'), float('-inf')], 0).fillna(0)
         conn.close()
+
+        results = []
+        for _, row in df.iterrows():
+            try:
+                curr = float(row['curr_price'] or row['price'] or 0)
+                oprc = float(row['open'] or curr or 0)
+                change_pct = round(((curr - oprc) / oprc * 100), 2) if oprc > 0 else 0
+                
+                bsop = float(row['bsop_prfi'] or 0)
+                sales = float(row['sale_account'] or 0)
+                op_margin = round((bsop / sales * 100), 1) if sales > 0 else 0
+                
+                # [v3.9] 현실적인 범위 제한 (데이터 오류 방지)
+                if op_margin > 100 or op_margin < -100:
+                    op_margin = 0
+
+                results.append({
+                    "symbol": str(row['symbol']),
+                    "name": str(row['name']),
+                    "price": int(curr),
+                    "change": change_pct,
+                    "rsScore": float(row['rsScore'] or 0),
+                    "vcpRatio": float(row['vcpRatio'] or 0),
+                    "track": str(row['track']),
+                    "dividendYield": float(row['dividendYield'] or 0),
+                    "roe": round(float(row['roe'] or 0), 1),
+                    "opMargin": op_margin,
+                    "isStage2": 1,
+                    "sector": str(row['track']).split("(")[-1].replace(")", "") if "(" in str(row['track']) else "기타",
+                    "volumeDryUp": float(row['vcpRatio'] or 1.0) < 0.5,
+                    "targetPrice": int(row['price'] or 0),
+                    "stopLossPrice": int(row['stopLossPrice'] or 0),
+                    "rationale": [str(row['rationale'])],
+                    "weight": str(row['weight']),
+                    "atr": 0,
+                    "volatility": 0,
+                    "template": {
+                        "priceAbove50": True, "priceAbove150_200": True, 
+                        "sma150Above200": True, "sma50Above150_200": True,
+                        "sma200TrendingUp": True, "above52wLow25": True, 
+                        "within52wHigh25": True, "rsAbove70": True
+                    }
+                })
+            except Exception as e:
+                print(f"Row processing error: {e}")
+                continue
+
+        return results
+    except Exception as e:
+        print(f"Global API Error: {e}")
         return []
-    max_date = res[0]
 
-    # 2. 데이터 조회
+
+@app.get("/api/stocks/{code}/history")
+def get_stock_history(code: str):
+    """특정 종목의 최근 100일치 시세 및 이평선 데이터 반환 (차트용)"""
+    conn = get_connection()
     query = """
-        SELECT 
-            d.code as symbol, m.name, d.close as price, d.open, d.rs_score as rsScore,
-            d.vol_std_10d, d.vol_std_50d,
-            d.sma_50 as sma50, d.sma_150 as sma150, d.sma_200 as sma200,
-            d.high_52w as high52w, d.low_52w as low52w,
-            d.dividend_yield as dividendYield,
-            (SELECT category_name FROM sectors_themes WHERE code = d.code AND category_type = 'THEME' LIMIT 1) as sector
-        FROM daily_analysis d
-        JOIN master_info m ON d.code = m.code
-        WHERE d.date = ?
-        ORDER BY d.rs_score DESC
+        SELECT date, open, high, low, close, volume, sma_50, sma_150, sma_200
+        FROM daily_analysis
+        WHERE code = ?
+        ORDER BY date DESC
+        LIMIT 100
     """
-    df = pd.read_sql_query(query, conn, params=(max_date,))
+    df = pd.read_sql_query(query, conn, params=(code,))
+    df = df.replace([float('inf'), float('-inf')], 0).fillna(0)
+    
+    # [v3.7] 수정주가 이슈 대응: 주가가 급격히 튀는 첫 봉 등을 보정
+    if not df.empty:
+        curr_price = df.iloc[0]['close']
+        df['close'] = df['close'].apply(lambda x: curr_price if x > curr_price * 10 else x)
+        df['sma_50'] = df['sma_50'].apply(lambda x: curr_price if x > curr_price * 10 else x)
+
     conn.close()
-
-    # 3. 데이터 가공 (Mapping)
-    results = []
-    for _, row in df.iterrows():
-        # 등락률 계산
-        change_pct = round(((row['price'] - row['open']) / row['open'] * 100), 2) if row['open'] > 0 else 0
-        
-        # VCP 비율
-        vcp_ratio = round(row['vol_std_10d'] / row['vol_std_50d'], 3) if row['vol_std_50d'] and row['vol_std_50d'] > 0 else 0
-
-        # Track 분류 (TrackType Enum 값에 맞춤)
-        track = "트랙 2: 뚜벅이 (고배당)"
-        if row['rsScore'] and row['rsScore'] >= 80:
-            if row['sector'] and row['sector'] != "미분류":
-                track = "트랙 1: 추세 추종 (주도주)"
-            else:
-                track = "트랙 EX: 개별 모멘텀"
-
-        # Template 조건 (TrendTemplateStatus 인터페이스에 맞춤)
-        template = {
-            "priceAbove50": row['price'] > row['sma50'] if row['sma50'] else False,
-            "priceAbove150_200": (row['price'] > row['sma150'] and row['price'] > row['sma200']) if row['sma150'] and row['sma200'] else False,
-            "sma150Above200": row['sma150'] > row['sma200'] if row['sma150'] and row['sma200'] else False,
-            "sma50Above150_200": (row['sma50'] > row['sma150'] and row['sma50'] > row['sma200']) if row['sma50'] and row['sma150'] and row['sma200'] else False,
-            "sma200TrendingUp": True, # 일단 기본값
-            "above52wLow25": row['price'] >= (row['low52w'] * 1.25) if row['low52w'] else False,
-            "within52wHigh25": row['price'] >= (row['high52w'] * 0.75) if row['high52w'] else False,
-            "rsAbove70": (row['rsScore'] >= 70) if row['rsScore'] else False
-        }
-
-        results.append({
-            "symbol": row['symbol'],
-            "name": row['name'],
-            "price": int(row['price']),
-            "change": change_pct,
-            "rsScore": round(row['rsScore'], 1) if row['rsScore'] else 0,
-            "vcpRatio": vcp_ratio,
-            "sma50": row['sma50'],
-            "sma150": row['sma150'],
-            "sma200": row['sma200'],
-            "track": track,
-            "dividendYield": row['dividendYield'],
-            "isStage2": 1 if (template["priceAbove50"] and template["sma150Above200"]) else 0,
-            "sector": row['sector'] or "미분류",
-            "template": template,
-            "volumeDryUp": vcp_ratio < 0.5,
-            "targetPrice": int(row['high52w']) if row['high52w'] else 0,
-            "stopLossPrice": int(row['price'] * 0.93), # 7% 손절 기본
-            "rationale": [f"RS {round(row['rsScore'],1)}점의 강력한 모멘텀", f"{row['sector']} 섹터 주도주 후보"],
-            "atr": 0,
-            "volatility": 0
-        })
-
-    return results[:200] # 상위 200개만 반환
+    df = df.sort_values('date')
+    return df.to_dict(orient="records")
 
 @app.get("/api/account")
 def get_account_summary():

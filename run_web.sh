@@ -2,12 +2,11 @@
 
 # 1. Backend 실행 (Background)
 echo "🚀 Starting TrendHunter Backend (FastAPI)..."
-# uvicorn 설치 여부 확인
-if ! command -v uvicorn &> /dev/null; then
-    echo "Installing backend dependencies..."
-    pip install fastapi uvicorn pandas sqlite3
-fi
-uvicorn run_server:app --reload --port 8000 &
+python3 -m pip install fastapi uvicorn pandas sqlite3 > /dev/null 2>&1
+
+# 로그 파일을 임시 디렉토리로 이동 (Vite 감시 피하기)
+LOG_FILE="/tmp/trendhunter_api.log"
+PYTHONPATH=. python3 -m uvicorn src.api:app --port 8000 > "$LOG_FILE" 2>&1 &
 BACKEND_PID=$!
 
 # 2. Frontend 실행

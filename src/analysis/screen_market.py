@@ -1,49 +1,16 @@
-"Track1/Track EX/Track2 통합 리포트 v2.5 (자동매매 플랜 저장 기능 포함)."
+"Track1/Track EX/Track2 통합 리포트 v4.5 (거장의 철학 + 정석 엔진 통합)."
 import pandas as pd
 import numpy as np
 from datetime import datetime
 from src.db import get_connection
 from src.analysis.market_filter import check_market_health
 from collections import Counter
-import os
 
 def get_themes_for_stock(code):
     conn = get_connection()
     df = pd.read_sql_query("SELECT category_name FROM sectors_themes WHERE code = ? AND category_type = 'THEME'", conn, params=(code,))
     conn.close()
     return df["category_name"].tolist()
-
-def get_trend_candidates_db():
-    conn = get_connection()
-    res = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()
-    if not res or not res[0]:
-        conn.close()
-        return pd.DataFrame()
-    max_date = res[0]
-    query = f"""
-    SELECT 
-        d.date, d.code, m.name, m.market_type,
-        d.close, d.amount, d.volume, d.rs_score,
-        (d.vol_std_10d / d.vol_std_50d) as vcp_ratio,
-        d.high_52w, d.low_52w, d.sma_20, d.sma_50, d.sma_150, d.sma_200,
-        d.volume_sma_50, m.bsop_prfi, m.thtr_ntin, m.roe
-    FROM daily_analysis d
-    JOIN master_info m ON d.code = m.code
-    WHERE d.date = '{max_date}'
-      AND d.amount >= 3000000000
-      AND d.close > d.sma_50 AND d.sma_50 > d.sma_150 AND d.sma_150 > d.sma_200
-      AND d.high_52w IS NOT NULL
-      AND d.close >= d.low_52w * 1.25
-      AND d.close >= d.high_52w * 0.80
-      AND d.rs_score >= 80
-      AND (d.vol_std_10d / d.vol_std_50d) < 0.9
-      AND d.volume < (d.volume_sma_50 * 0.8)
-      AND ((m.bsop_prfi > 0 AND m.thtr_ntin > 0) OR (d.rs_score >= 90))
-    ORDER BY d.rs_score DESC
-    """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
 
 def get_supply_quality(code):
     conn = get_connection()
@@ -91,139 +58,135 @@ def check_chart_pattern(code):
     if (recent_shadow / recent['close']).mean() > 0.03: return False
     return True
 
-def get_box_bottom(code):
+def get_trend_candidates_db():
     conn = get_connection()
-    df = pd.read_sql_query(f"SELECT low FROM daily_analysis WHERE code = '{code}' ORDER BY date DESC LIMIT 5", conn)
+    res = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()
+    if not res or not res[0]:
+        conn.close(); return pd.DataFrame()
+    max_date = res[0]
+    
+    # [v4.5 통합 필터] 기존 정석 조건 + RS 90 상향
+    query = f"""
+    SELECT 
+        d.date, d.code, m.name, m.market_type,
+        d.close, d.amount, d.volume, d.rs_score,
+        (d.vol_std_10d / d.vol_std_50d) as vcp_ratio,
+        d.high_52w, d.low_52w, d.sma_20, d.sma_50, d.sma_150, d.sma_200,
+        d.volume_sma_50, m.bsop_prfi, m.thtr_ntin, m.roe, m.sale_account
+    FROM daily_analysis d
+    JOIN master_info m ON d.code = m.code
+    WHERE d.date = '{max_date}'
+      AND d.amount >= 3000000000
+      AND d.close > d.sma_50 AND d.sma_50 > d.sma_150 AND d.sma_150 > d.sma_200
+      AND d.close >= d.low_52w * 1.25
+      AND d.close >= d.high_52w * 0.80
+      AND d.rs_score >= 90
+      AND (d.vol_std_10d / d.vol_std_50d) < 0.9
+    ORDER BY d.rs_score DESC
+    """
+    df = pd.read_sql_query(query, conn)
     conn.close()
-    if df.empty or df['low'].isnull().all(): return 0
-    return df['low'].min()
+    return df
 
-def save_to_trade_plan(candidates):
+def calculate_survival_trade(row):
+    entry = get_breakout_price(row['high_52w'])
+    stop_fixed = entry * 0.93
+    stop_sma20 = row['sma_20'] or 0
+    stop = max(stop_fixed, stop_sma20)
+    stop = adjust_to_tick(stop, 'down')
+    
+    # [스승의 필터] 손절선 붕괴 여부
+    is_broken = row['close'] < stop
+    
+    risk_pct = (entry - stop) / entry if entry > stop else 0.07
+    weight = min(20, int(1.0 / risk_pct))
+    
+    return entry, stop, f"{weight}%", is_broken
+
+def save_to_trade_plan(candidates, track_name="TRACK 1"):
     if not candidates: return
     conn = get_connection()
     cursor = conn.cursor()
     today = datetime.now().strftime('%Y-%m-%d')
-    
     for row in candidates:
-        entry = get_breakout_price(row['high_52w'])
-        box_bottom = get_box_bottom(row['code'])
-        # 손절가: 박스권 하단과 1% 손절선 중 손해가 적은(높은 가격) 쪽 선택
-        stop = max(box_bottom, int(entry * 0.99))
-        stop = adjust_to_tick(stop, 'down')
+        entry, stop, weight, is_broken = calculate_survival_trade(row)
+        vcp = row.get('vcp_ratio', 0)
+        
+        # [v4.5] 거장들의 잣대 적용 상태값
+        if is_broken: status = 'CANCEL'
+        elif vcp > 0.1: status = 'WATCH'
+        else: status = 'READY'
+        
+        rationale = f"RS {row['rs_score']:.1f} | VCP {vcp:.2f} | " + \
+                    ("추세 붕괴(매도)" if is_broken else "변동성 수축 대기" if vcp > 0.1 else "돌파 임박")
         
         cursor.execute("SELECT id FROM trade_plan WHERE date = ? AND code = ?", (today, row['code']))
-        exists = cursor.fetchone()
-        
-        if exists:
+        if cursor.fetchone():
             cursor.execute("""
-                UPDATE trade_plan SET entry_price = ?, stop_price = ?, weight = ?, status = 'READY'
-                WHERE date = ? AND code = ?
-            """, (entry, stop, "15%", today, row['code']))
+                UPDATE trade_plan SET entry_price=?, stop_price=?, weight=?, status=?,
+                track=?, rs_score=?, vcp_ratio=?, rationale=? WHERE date=? AND code=?
+            """, (entry, stop, weight, status, track_name, row['rs_score'], vcp, rationale, today, row['code']))
         else:
             cursor.execute("""
-                INSERT INTO trade_plan (date, code, name, entry_price, stop_price, weight, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (today, row['code'], row['name'], entry, stop, "15%", "READY"))
-            
+                INSERT INTO trade_plan (date, code, name, entry_price, stop_price, weight, status, track, rs_score, vcp_ratio, rationale) 
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, (today, row['code'], row['name'], entry, stop, weight, status, track_name, row['rs_score'], vcp, rationale))
     conn.commit()
     conn.close()
-    print(f" [DB] {len(candidates)}개 종목의 매매 계획이 trade_plan에 저장되었습니다.")
-
-def print_one_line(row, weight, prefix):
-    entry = get_breakout_price(row['high_52w'])
-    box_bottom = get_box_bottom(row['code'])
-    stop = max(box_bottom, int(entry * 0.99))
-    stop = adjust_to_tick(stop, 'down')
-    print(f"{prefix} {row['name']:<10} ({row['code']}) | RS {row['rs_score']:2.0f} | {row['quality']} | 🎯진입:{entry:>8,} | 🛡️손절:{stop:>8,} | ⚓비중:{weight}")
 
 def generate_full_report():
-    print("-" * 100)
-    print(f" [TrendHunter v2.5] 전설의 정석 (1-Line Brief) | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("-" * 100)
+    print("-" * 105)
+    print(f" [TrendHunter v4.5 Master's Soul] 거장의 원칙과 정석 로직의 결합 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print("-" * 105)
     
-    market_status = check_market_health()
-    status_str = "✅ [공격]" if not any(m['status'] == 'RED' for m in market_status) else "🚨 [방어]"
-    indices = " / ".join([f"{m['name']}:{m['curr']:,.0f}" for m in market_status])
-    print(f"[{status_str}] {indices}")
-
     raw_df = get_trend_candidates_db()
-    print("\n[🔍 주도주 필터링 깔때기]")
-    print(f"   1. 후보군 (RS 80+ & 정배열): {len(raw_df)}개")
-    
     final_list = []
-    chart_pass = 0
-    supply_pass = 0
     
     if not raw_df.empty:
         for _, row in raw_df.iterrows():
             if check_chart_pattern(row['code']):
-                chart_pass += 1
                 quality = get_supply_quality(row['code'])
                 if "이탈" not in quality:
-                    supply_pass += 1
                     row['quality'] = quality
                     final_list.append(row)
     
-    print(f"   2. 차트 패턴 통과 (Tightness): {chart_pass}개")
-    print(f"   3. 수급 질적 분석 통과 (매집): {supply_pass}개")
-    
     if final_list:
-        save_to_trade_plan(final_list)
-        trend_df = pd.DataFrame(final_list)
-        themed_stocks = []
-        unthemed_stocks = []
         all_themes = []
-        for _, row in trend_df.iterrows():
+        for row in final_list:
             themes = get_themes_for_stock(row["code"])
-            if themes: themed_stocks.append((row, themes)); all_themes.extend(themes)
-            else: unthemed_stocks.append(row)
-
-        top_1_theme = Counter(all_themes).most_common(1)[0][0] if all_themes else "기타"
+            if themes: all_themes.extend(themes)
+        top_theme = Counter(all_themes).most_common(1)[0][0] if all_themes else "독립강세"
         
-        print(f"\n[🔥 TRACK 1: {top_1_theme}]")
-        t1_c = 0
-        for row, themes in themed_stocks:
-            if top_1_theme in themes:
-                print_one_line(row, "15%", " ▶")
-                t1_c += 1
-                if t1_c >= 3: break
+        save_to_trade_plan(final_list, f"트랙 1: {top_theme}")
+        
+        for row in final_list:
+            e, s, w, brk = calculate_survival_trade(row)
+            mark = "🚨" if brk else "⏳" if row['vcp_ratio'] > 0.1 else "🎯"
+            print(f" {mark} {row['name']:<10} | RS {row['rs_score']:2.0f} | {row['quality']} | VCP {row['vcp_ratio']:.2f} | 🎯:{e:>7,} | 🛡️:{s:>7,}")
 
-        print(f"\n[🚀 TRACK EX: 독립강세]")
-        for row in unthemed_stocks[:3]:
-            print_one_line(row, " 3%", " ▶")
-
-        print(f"\n[🏆 MARKET LEADERS: 틈새대장]")
-        ml_c = 0
-        for row, themes in themed_stocks:
-            if top_1_theme not in themes:
-                print_one_line(row, " 7%", " ▶")
-                ml_c += 1
-                if ml_c >= 3: break
+        # [v4.5] 요약 테이블 업데이트
+        conn = get_connection()
+        res_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
+        total = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{res_date}'").fetchone()[0]
+        s2 = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{res_date}' AND close > sma_50 AND sma_50 > sma_150").fetchone()[0]
+        avg_rs = conn.execute(f"SELECT AVG(rs_score) FROM daily_analysis WHERE date='{res_date}'").fetchone()[0] or 0
+        conn.execute("INSERT OR REPLACE INTO market_summary (date, top_sector, active_leaders, stage2_ratio, market_rs, risk_level) VALUES (?,?,?,?,?,?)",
+                     (res_date, top_theme, len(final_list), round(s2/total*100, 1), round(avg_rs, 1), "SAFE" if avg_rs > 45 else "CAUTION"))
+        conn.commit(); conn.close()
     else:
-        print("\n[🔍] 현재 전설의 기준을 통과한 성장주가 없습니다.")
+        print("\n [!] 거장의 기준을 통과한 주도주가 없습니다. 현금을 확보하고 인내하십시오.")
 
+    # TRACK 2 복구 (v6.0 정석 배당)
     conn = get_connection()
-    res = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()
-    if res and res[0]:
-        max_date = res[0]
-        # [v3.4] 배당 상한선(25%) 및 ROE 상한선(100%) 추가하여 데이터 오류 방지
-        query_div = f"""
-            SELECT DISTINCT m.code, m.name, d.dividend_yield, m.roe 
-            FROM daily_analysis d 
-            JOIN master_info m ON d.code = m.code 
-            WHERE d.date = '{max_date}' 
-              AND d.dividend_yield BETWEEN 7.0 AND 25.0 
-              AND m.thtr_ntin > 0 
-              AND m.roe BETWEEN 10.0 AND 100.0
-            ORDER BY d.dividend_yield DESC LIMIT 3
-        """
-        div_df = pd.read_sql_query(query_div, conn)
-        print(f"\n[🛡️ TRACK 2: 고배당파킹]")
-        for _, row in div_df.iterrows():
-            print(f" ▶ {row['name']:<10} ({row['code']}) | 배당:{row['dividend_yield']:>5.1f}% | ROE:{row['roe']:>5.1f}% | ⚓비중:현금전량")
+    max_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
+    query_div = f"SELECT DISTINCT m.code, m.name, d.dividend_yield, m.roe FROM daily_analysis d JOIN master_info m ON d.code = m.code WHERE d.date = '{max_date}' AND d.dividend_yield >= 7.0 AND m.roe >= 10.0 ORDER BY d.dividend_yield DESC LIMIT 10"
+    div_df = pd.read_sql_query(query_div, conn)
+    if not div_df.empty:
+        print(f"\n[🛡️ TRACK 2: 정석 고배당 (Trailing 12M)]")
+        for _, r in div_df.iterrows():
+            print(f" ▶ {r['name']:<10} | 배당:{r['dividend_yield']:>5.1f}% | ROE:{r['roe']:>5.1f}%")
     conn.close()
-
-    print("-" * 100)
+    print("-" * 105)
 
 if __name__ == "__main__":
     generate_full_report()

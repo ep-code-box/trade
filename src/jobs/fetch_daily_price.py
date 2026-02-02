@@ -26,7 +26,15 @@ async def fetch_single_stock_async(code, name, last_date, today_str):
     current_end = today_str
     
     for _ in range(max_calls):
-        params = {"FID_COND_MRKT_DIV_CODE": mrkt_div, "FID_INPUT_ISCD": code, "FID_INPUT_DATE_1": start_dt, "FID_INPUT_DATE_2": current_end, "FID_PERIOD_DIV_CODE": "D", "FID_ORG_ADJ_PRC": "1"}
+        # [스승님의 지침] FID_ORG_ADJ_PRC: "0" (수정주가 적용) - 배당락 착시 방지
+        params = {
+            "FID_COND_MRKT_DIV_CODE": mrkt_div, 
+            "FID_INPUT_ISCD": code, 
+            "FID_INPUT_DATE_1": start_dt, 
+            "FID_INPUT_DATE_2": current_end, 
+            "FID_PERIOD_DIV_CODE": "D", 
+            "FID_ORG_ADJ_PRC": "0"
+        }
         data = await kis_get_async(path, params=params, tr_id=tr_id)
         api_call_count += 1 # 실제 API 쏜 횟수
         

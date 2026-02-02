@@ -53,7 +53,7 @@ def init_db():
             mrkt_alrm_risk_adnt_yn TEXT,    -- 시장 경고위험 예고
             insn_pbnt_yn TEXT,              -- 불성실 공시 여부
             byps_lstn_yn TEXT,              -- 우회 상장 여부
-            flng_cls_code TEXT,             -- 락구분 코드
+            flng_cls_code TEXT,             -- 락구분 코드 (01:권리락, 02:배당락...)
             fcam_mod_cls_code TEXT,         -- 액면가 변경 구분
             icic_cls_code TEXT,             -- 증자 구분
             crdt_able TEXT,                 -- 신용주문 가능 여부
@@ -62,7 +62,7 @@ def init_db():
             krx300_issu_yn TEXT,            -- KRX300 종목
             
             -- [가격/재무 정보]
-            stck_sdpr INTEGER,              -- 주식 기준가
+            stck_sdpr INTEGER,              -- 주식 기준가 (배당락 전 보정용)
             frml_mrkt_deal_qty_unit INTEGER,-- 정규 시장 매매 수량 단위
             ovtm_mrkt_deal_qty_unit INTEGER,-- 시간외 시장 매매 수량 단위
             marg_rate TEXT,                 -- 증거금 비율

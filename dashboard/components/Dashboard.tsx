@@ -6,57 +6,24 @@ import { MOCK_MARKET_SUMMARY } from '../mockData';
 
 interface DashboardProps {
   stocks: StockData[];
+  summary: any; // MarketSummary 확장
   insight: MentorInsight | null;
   loading: boolean;
   onRetry: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ stocks, insight, loading, onRetry }) => {
+const Dashboard: React.FC<DashboardProps> = ({ stocks, summary, insight, loading, onRetry }) => {
   const [logs, setLogs] = useState<string[]>(["[SYSTEM] TrendHunter Engine Initializing..."]);
-  const leadersCount = stocks.filter(s => s.rsScore > 90).length;
-  const stage2Count = stocks.filter(s => s.isStage2).length;
-
-  useEffect(() => {
-    const messages = [
-      "[INFO] KIS API 세션 연결 성공...",
-      "[INFO] 2,540개 종목 데이터 수집 완료",
-      "[PROCESS] RS Rating 및 VCP 분석 수행 중",
-      "[SUCCESS] 퀀트 필터링 시스템 가동 중",
-      "[READY] 실시간 전략 집행 대기 중"
-    ];
-    
-    let i = 0;
-    const interval = setInterval(() => {
-      if (i < messages.length) {
-        const nextMsg = messages[i];
-        if (nextMsg) {
-          setLogs(prev => [...prev.slice(-4), nextMsg]);
-        }
-        i++;
-      } else {
-        clearInterval(interval);
-      }
-    }, 1200);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  const getSentimentColor = (sentiment: string) => {
-    switch(sentiment) {
-      case 'bullish': return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
-      case 'bearish': return 'text-red-400 border-red-500/30 bg-red-500/10';
-      case 'warning': return 'text-orange-400 border-orange-500/30 bg-orange-500/10';
-      default: return 'text-blue-400 border-blue-500/30 bg-blue-500/10';
-    }
-  };
+  const leadersCount = summary.activeLeaders || 0;
+  const stage2Ratio = summary.stage2Ratio || 0;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700 pb-12">
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
-        <StatCard title="Stage 2 Ratio" value={`${MOCK_MARKET_SUMMARY.stage2Ratio}%`} sub={`상승추세 ${stage2Count}개`} trend="up" />
-        <StatCard title="Active Leaders" value={`${leadersCount}개`} sub="RS 점수 90점 이상" trend="up" />
-        <StatCard title="Risk Level" value="SAFE" sub="시장 베타 1.15" trend="neutral" />
-        <StatCard title="Key Sector" value={insight?.topSector || "N/A"} sub="AI 선정 주도 섹터" trend="warning" />
+        <StatCard title="Stage 2 Ratio" value={`${stage2Ratio}%`} sub={`시장 강세 흐름`} trend={stage2Ratio > 20 ? "up" : "neutral"} />
+        <StatCard title="Active Leaders" value={`${leadersCount}개`} sub="스크리너 통과 종목" trend={leadersCount > 5 ? "up" : "neutral"} />
+        <StatCard title="Risk Level" value={summary.riskLevel || "SAFE"} sub={`Alpha: ${summary.marketRS}`} trend={summary.riskLevel === "SAFE" ? "up" : "warning"} />
+        <StatCard title="Key Sector" value={summary.topSector || "None"} sub="장세 주도 테마" trend="warning" />
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">

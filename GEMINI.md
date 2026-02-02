@@ -33,66 +33,172 @@ The system follows a modular, service-oriented architecture:
 
 ### TRACK 1: Trend Following (Aggressive Growth)
 *   **Philosophy**: "Buy high, sell higher." Target market leaders in strong uptrends.
-*   **Target**: Leading stocks in dominant sectors (e.g., AI, Semiconductors, Robotics).
-*   **Selection Criteria (Minervini Trend Template)**:
-    1.  **Trend Alignment**: Price > SMA(50) > SMA(150) > SMA(200).
-    2.  **Momentum**: Price is at least 25% above the 52-week Low and within 25% of the 52-week High.
-    3.  **Relative Strength**: **RS Score ≥ 80** (Outperforming 80% of the market).
-    4.  **Volatility Contraction (VCP)**: `StdDev(10d) < StdDev(50d) * 0.9` (Price consolidation).
-    5.  **Supply Quality**: Evidence of institutional accumulation (Net buying volume on up-days > Net selling volume on down-days).
-    6.  **Fundamentals**: Must be profitable (Operating Profit & Net Income > 0).
+*   **Target**: Leading stocks in dominant sectors identified by the system.
+*   **Selection Criteria**:
+    1.  **Liquidity**: Daily Trading Value (**Amount**) ≥ **3 Billion KRW**.
+    2.  **Trend Alignment**: Price > SMA(50) > SMA(150) > SMA(200).
+    3.  **Momentum**: Price ≥ 52-week Low * 1.25 AND Price ≥ 52-week High * 0.80.
+    4.  **Relative Strength**: **RS Score ≥ 80** (Outperforming 80% of the market).
+    5.  **Volatility Contraction (VCP)**: `vcp_ratio (StdDev 10d / 50d) < 0.9`.
+    6.  **Volume Dry-up**: Current Volume < 50-day Volume SMA * 0.8.
+    7.  **Fundamentals**: Net Income & Operating Profit > 0 (Fallback: RS Score ≥ 90).
 
 ### TRACK EX: Independent Momentum (Catalyst Driven)
-*   **Target**: Stocks with explosive individual momentum, regardless of sector themes.
+*   **Target**: Stocks with explosive momentum not belonging to major themes.
 *   **Criteria**:
-    1.  **RS Score ≥ 90** (Top 10% market strength).
-    2.  **Volume Surge**: Recent volume > 200% of the 50-day average volume.
-    3.  **Price Action**: Trading near 52-week highs with strong breakout signals.
+    1.  Meets Track 1 technical criteria.
+    2.  Identified as "Unthemed" or "Niche Leader" by the analysis engine.
+    3.  Top 3 candidates by RS Score in this category.
 
 ### TRACK 2: Toobuk Investment (Dividend & Stability)
-*   **Philosophy**: "Time in the market." Secure stable cash flow through dividends and compound interest.
-*   **Target**: Undervalued blue-chip stocks with consistent dividend payouts.
+*   **Philosophy**: "Time in the market." Secure stable cash flow with blue-chip safety.
+*   **Target**: Undervalued stocks with extremely high yield and consistent profitability.
 *   **Criteria**:
-    1.  **High Yield**: Annualized Dividend Yield > **7%**.
-    2.  **Efficiency**: ROE > **10%**.
-    3.  **Safety**: Positive Operating Profit.
-*   **Mining Logic**: Automatically identifies dividend cycles (Monthly/Quarterly/Annual) via deep mining of KIS API data.
+    1.  **High Yield**: Annualized Dividend Yield between **7.0% and 25.0%**.
+    2.  **Efficiency**: ROE between **10% and 100%**.
+    3.  **Safety**: Positive Net Income (당기순이익 > 0).
+    4.  **Stability**: Identified via "Ultimate Tagging" for cycle consistency.
 
 ---
 
 ## 4. Operational Workflow (Daily Routine)
 
-The system operates on a rigorous daily cycle:
 
-1.  **Data Ingestion (Post-Market)**:
-    *   `python3 run.py daily`: Syncs OHLCV data. Uses incremental updates to minimize API load.
-    *   `python3 run.py fundamentals`: Updates financial health metrics (PER/PBR).
-    *   `python3 run.py supply`: Fetches foreigner and institutional net buying data.
-    *   `python3 run.py mine`: Updates dividend records via sector-based mining.
 
-2.  **Quantitative Analysis**:
-    *   `python3 run.py rs`: Recalculates the **Relative Strength Score** for all 3,800+ stocks based on weighted 3/6/9/12-month performance.
-    *   `python3 run.py recalc`: (Optional) Recomputes all technical indicators if algorithms change.
+The system operates on a rigorous 8-step pipeline:
 
-3.  **Screening & Planning**:
-    *   `python3 run.py screen`: Runs the screening engine.
-        -   Filters stocks based on Track 1/2 criteria.
-        -   Automatically calculates **Breakout Price** (Pivot) and **Stop-Loss** (Box Bottom).
-        -   Saves actionable plans to the `trade_plan` table.
 
-4.  **Visualization**:
-    *   Launch the API: `uvicorn src.api:app --reload`
-    *   Launch Dashboard: `npm run dev` (in `dashboard/`)
-    *   Review candidates visually before final execution.
+
+1.  **Identity Sync (`sync`)**: Establish baseline share counts and par values from MST.
+
+2.  **Context Mapping (`themes`)**: Map stocks to sectors to identify "Theme Clusters."
+
+3.  **Market Thermometer (`daily`)**: Fetch Index (KOSPI/KOSDAQ) and Stock price trends using **Adjusted Price**.
+
+4.  **Financial Audit (`fundamentals`)**: Back-calculate dividends from Income Statements (v6.0).
+
+5.  **Supply Intel (`supply`)**: Audit major institutional and foreign accumulation.
+
+6.  **Momentum Ranking (`rs`)**: Percentile rank all 3,800+ stocks based on relative strength.
+
+7.  **Screener Execution (`screen`)**: Combine all the above to pick leaders.
+
+9.  **Visualization (`dashboard`)**:
+    *   One-stop Startup: `bash run_web.sh`
+    *   Visual Audit: Review VCP patterns and dividend metrics on interactive charts.
+
+
 
 ---
 
 ## 5. Technical Implementation Details
 
--   **Smart Incremental Sync**: The `daily` job checks the last available date for each stock in the DB and fetches only the missing data points, ensuring efficiency.
--   **Robust Error Handling**: The `kis_api` module includes automatic retry logic for rate limits (HTTP 429) and network jitters.
--   **Production-Grade Data**: Critical financial data (Dividends, Fundamentals) is exclusively fetched from the **Production Domain** (`REAL_BASE_URL`) to guarantee accuracy, even when testing in a sandbox environment.
--   **Dynamic Supply Analysis**: The system evaluates the *quality* of supply, distinguishing between "passive holding" and "aggressive accumulation" by analyzing price-volume correlation on net-buying days.
+
+
+- **Adjusted Price Accuracy**: All trend analysis is performed on **Adjusted Prices (`adj_prc: 0`)** to prevent chart distortion from dividend drops or rights issues. "A chart without adjustment is a lie."
+
+- **Financial-Driven Dividends**: The system prioritizes dividends derived from **Income Statements** and **Payout Ratios**. This ensures data availability even during non-market hours and maintains a strict link between 'Earnings' and 'Dividends'.
+
+- **MST Parsing Integrity**: Uses official KIS string-slicing logic to handle multi-byte Korean characters, ensuring that fundamental metrics are never misaligned.
+
+
+
+## 6. 개발 및 운영 절대 원칙 (The Master's Core)
+
+
+
+
+
+
+
+이 시스템의 모든 수정과 데이터 분석은 아래 원칙을 반드시 준수해야 한다.
+
+
+
+
+
+
+
+### A. 데이터 무결성 지침 (Data Integrity)
+
+
+
+- **명세서 준수**: 모든 API 호출과 데이터 파싱은 `HANTOO_API_SPEC.md`에 정의된 단위(Unit)를 절대적으로 따른다.
+
+
+
+    - 재무제표(`thtr_ntin` 등): 백만 원 (* 1,000,000)
+
+
+
+    - 상장주수(`lstn_stcn`): 실시간 현재가 API 기준 '주' 단위
+
+
+
+    - 배당성향(`payout_rate`): 퍼센트(%) 단위 (/ 100)
+
+
+
+- **ROE 파싱**: 공식 API가 주는 수치는 정직하다. 자의적인 필터링(90% 캡핑 등)을 금지하며, 날짜 접두어 유무에 따른 정석적인 파싱만 허용한다.
+
+
+
+
+
+
+
+### B. 퀀트 필터 지침 (Master's Filter)
+
+
+
+- **성장주(Track 1)**: 거장들의 잣대를 유지한다.
+
+
+
+    - **RS 90+**: 상위 10%의 리더만 선별.
+
+
+
+    - **VCP < 0.1**: 변동성이 10% 이내로 극도로 응축된 'Tight'한 구간만 진입.
+
+
+
+    - **Stop-Loss Breach**: 손절선 하회 시 기도하지 않고 즉시 'CANCEL'.
+
+
+
+- **배당주(Track 2)**: 재무제표 기반 v6.5 역산 엔진을 표준으로 삼는다.
+
+
+
+
+
+
+
+### C. 시스템 아키텍처 (Batch-Driven)
+
+
+
+- **배치 우선**: 모든 무거운 연산(트랙 분류, 타점 계산, 시장 요약)은 `run.py screen` 단계에서 완료하여 DB에 저장한다.
+
+
+
+- **API 역할**: API 서버는 DB에 저장된 최종 결론을 계산 없이 즉시 서빙하는 역할에 집중한다.
+
+
+
+- **차트 렌더링**: 트랙별 성격에 맞는 UI(성장주: 기술적 지표 / 배당주: 펀더멘탈 카드)를 제공한다.
+
+
+
+
+
+
 
 ---
-**AI Mentor's Directive**: "Trust the data, enforce the rules, and ignore the noise. The system is the master."
+
+
+
+**최종 지침**: "문서를 먼저 읽고, 데이터를 의심하되, 정해진 로직은 수호하라."
+
+

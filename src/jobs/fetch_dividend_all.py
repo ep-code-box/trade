@@ -10,8 +10,8 @@ def fetch_dividend_rank(market_gb, dividend_gb):
     path = "/uapi/domestic-stock/v1/ranking/dividend-rate"
     from datetime import datetime
     now = datetime.now().strftime("%Y%m%d")
-    # 작년 1월 1일부터 오늘까지
-    f_dt = str(int(now[:4]) - 1) + "0101"
+    # [최신 1년+ 타겟팅] 2024년 1월 1일부터 오늘까지 (확정 배당금 포함)
+    f_dt = "20240101"
     
     params = {
         "CTS_AREA": "", "GB1": market_gb, "UPJONG": "0001",
@@ -37,23 +37,37 @@ def run_dividend_sync():
     summary = {}
     for item in all_raw_data:
         code = item.get("sht_cd", "").strip()
+        # [보정] 배당 기준일(Base Date)을 키로 사용하여 중복 합산 방지
+        base_dt = item.get("stck_dvdn_base_dt", "").strip()
         dps = int(item.get("per_sto_divi_amt", 0))
-        if not code:
+        
+        if not code or not base_dt or dps <= 0:
             continue
+            
         if code not in summary:
-            summary[code] = {"total_dps": 0}
-        summary[code]["total_dps"] += dps
+            summary[code] = {}
+        
+        # 동일한 기준일의 배당은 가장 큰 값 하나만 인정 (혹은 중복 제거)
+        if base_dt not in summary[code]:
+            summary[code][base_dt] = dps
+        else:
+            summary[code][base_dt] = max(summary[code][base_dt], dps)
 
     conn = get_connection()
     cur = conn.cursor()
     updated_count = 0
-    for code, info in summary.items():
-        total_dps = info["total_dps"]
+    
+    for code, base_dates in summary.items():
+        # [최종] 서로 다른 기준일의 배당금만 합산
+        total_dps = sum(base_dates.values())
+        
         cur.execute("UPDATE master_info SET per_stock_dvdn_amt = ? WHERE code = ?", (total_dps, code))
-        cur.execute(
-            "UPDATE daily_analysis SET dividend_yield = (CAST(? AS REAL) / close) * 100 WHERE code = ? AND date = (SELECT MAX(date) FROM daily_analysis WHERE code = ?)",
-            (total_dps, code, code),
-        )
+        # 최신 날짜의 daily_analysis에 배당 수익률 반영
+        cur.execute("""
+            UPDATE daily_analysis 
+            SET dividend_yield = (CAST(? AS REAL) / close) * 100 
+            WHERE code = ? AND date = (SELECT MAX(date) FROM daily_analysis WHERE code = ?)
+        """, (total_dps, code, code))
         if cur.rowcount > 0:
             updated_count += 1
     conn.commit()

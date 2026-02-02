@@ -1,100 +1,103 @@
 # TrendHunter Operation Manual
 
 이 문서는 TrendHunter 시스템의 설치, 초기화, 운영, 그리고 문제 해결을 위한 통합 가이드입니다.
-(최종 업데이트: 2026-02-02)
+(최종 업데이트: 2026-02-03)
 
 ---
 
 ## 1. 시스템 개요
-TrendHunter는 KIS API를 기반으로 한국 주식 시장(KOSPI, KOSDAQ)의 전 종목 데이터를 수집하고, 정량적 전략(Minervini Trend, Dividend Growth 등)에 따라 유망 종목을 발굴하는 시스템입니다.
+TrendHunter는 KIS API를 기반으로 한국 주식 시장(KOSPI, KOSDAQ)의 전 종목 데이터를 수집하고, 전설적인 투자자(Mark Minervini 등)의 전략과 고배당 전략을 결합한 하이브리드 분석 엔진입니다.
 
-### 핵심 디렉토리 구조
-*   `src/`: 소스 코드 (진입점 `run.py`가 이를 호출)
-    *   `jobs/`: 데이터 수집 (API -> DB)
-    *   `analysis/`: 데이터 분석 및 리포트 (DB -> Console)
-    *   `db/`: DB 스키마 및 연결 관리
-*   `TrendHunter/db/stock_info.db`: 메인 데이터베이스 (SQLite)
+### 핵심 시스템 엔진
+*   **30 TPS 광속 수집**: KIS API 실전 한계(약 35~40 TPS)를 고려하여 최적화된 30 TPS 리미터를 적용, 전 종목 스캔 시간을 50% 이상 단축.
+*   **배치 중심 분석**: 무거운 연산은 `run.py screen` 단계에서 모두 수행하여 `trade_plan`과 `market_summary` 테이블에 저장. API는 계산 없이 즉시 데이터 서빙.
 
 ---
 
-## 2. 초기화 (Reset & Init)
-데이터베이스가 꼬였거나 처음부터 다시 시작해야 할 때 수행합니다.
+## 2. 초기화 및 기초 공사 (Reset & Sync)
+데이터의 무결성은 이 단계에서 결정됩니다. **추측이 아닌 공식 규격**을 따르는 것이 핵심입니다.
 
 ```bash
-# 1. 기존 DB 삭제
+# 1. DB 초기화 (필요시)
 rm -f TrendHunter/db/stock_info.db
+python3 run.py init
 
-# 2. 필수 테이블 생성 및 기초 데이터 동기화
-# (순서 중요: init -> sync -> themes -> views)
-python3 run.py init      # 테이블(Schema) 생성
-python3 run.py sync      # 종목 코드(Master) 동기화
-python3 run.py themes    # 테마/업종 코드 동기화
-python3 run.py views     # 분석용 View 생성
+# 2. 마스터 동기화 (v8.0 정석 파서 적용)
+# 한글 밀림 방지를 위해 '뒤에서부터 자르는' 공식 로직을 사용합니다.
+python3 run.py sync
+
+# 3. 테마 및 뷰 생성
+python3 run.py themes
+python3 run.py views
 ```
 
 ---
 
-## 3. 데이터 수집 (Daily Routine)
-데이터 수집은 시간이 오래 걸리므로 **백그라운드 실행(`nohup`)**을 권장합니다.
-특히 입출력 에러 방지를 위해 `< /dev/null` 리다이렉션을 사용하는 것이 안정적입니다.
+## 3. 데이터 감사 루틴 (Data Audit Routine)
+"데이터가 없으면 매매는 도박이다"라는 원칙에 따라 매일 다음 과정을 수행합니다.
 
-### 3.1 시세 수집 (가장 중요, 약 20~30분 소요)
-전 종목의 일봉, 거래량, 이동평균선을 수집합니다.
+### 3.1 수정주가 시세 수집
+배당락으로 인한 차트 왜곡을 방지하기 위해 반드시 **수정주가(Adjusted Price)** 옵션을 사용합니다.
 ```bash
-nohup python3 -u run.py daily > fetch_daily.log 2>&1 < /dev/null &
-# 진행 상황 확인: tail -f fetch_daily.log
+# 내부적으로 FID_ORG_ADJ_PRC="0" 옵션이 상시 가동됩니다.
+python3 run.py daily
 ```
 
-### 3.2 보조 데이터 수집 (병렬 실행 가능)
-시세 수집과 동시에 돌려도 됩니다. 리포트의 필터링(흑자 여부, 배당률, 수급)에 필수적입니다.
-
+### 3.2 펀더멘털 & 배당 역산 (v6.0 결산 추적형)
+단순 조회가 아닌, **기업의 결산 재무제표를 추적**하여 배당금을 직접 계산해냅니다.
 ```bash
-# 1. 펀더멘털 (PER, PBR, 영업이익 등)
-nohup python3 -u run.py fundamentals > fetch_fund.log 2>&1 < /dev/null &
+# 손익계산서(이익) + 기타비율(배당성향)을 결합하여 실시간 외 시간에도 작동합니다.
+python3 run.py fundamentals
+```
 
-# 2. 배당 정보 (업종별 마이닝 - 시간이 좀 걸림)
-nohup python3 -u run.py mine > fetch_div.log 2>&1 < /dev/null &
+## 5. 시각화 및 대시보드 (Visualization)
+추출된 S급 종목들을 차트와 함께 시각적으로 검토합니다.
 
-# 3. 수급 정보 (외국인/기관 매매동향 - 선택 사항)
-nohup python3 -u run.py supply > fetch_supply.log 2>&1 < /dev/null &
+### 5.1 원스톱 실행 (추천)
+백엔드 API와 프런트엔드 대시보드를 한 번에 실행하고 종료 시 자동으로 정리합니다.
+```bash
+bash run_web.sh
+```
+
+### 5.2 수동 실행 (디버깅 및 개별 관리용)
+특정 모듈의 로그를 직접 확인하거나 개별적으로 가동해야 할 때 사용합니다.
+
+**A. 백엔드 API 서버 (FastAPI)**
+```bash
+# 종목 데이터 및 분석 결과를 JSON으로 제공 (포트 8000)
+export PYTHONPATH=$PYTHONPATH:.
+uvicorn src.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+**B. 프런트엔드 대시보드 (React/Vite)**
+```bash
+# UI 및 인터랙티브 차트 가동 (포트 5173)
+cd dashboard
+npm run dev
 ```
 
 ---
 
-## 4. 분석 및 리포트 (Reporting)
-데이터 수집이 완료된 후 실행합니다.
+## 6. 데이터 파이프라인 상세 공정 (Pipeline Details)
+각 단계는 독립적으로 실행 가능하며, 선행 데이터가 누락될 경우 결과가 왜곡될 수 있습니다.
 
-### 4.1 RS 점수 계산 (필수)
-상대 강도(Relative Strength) 점수를 계산하여 `daily_analysis` 테이블에 업데이트합니다.
-```bash
-python3 run.py rs
-```
+1. **`init`**: DB 스키마 생성. (최초 1회)
+2. **`sync`**: MST 파일 파싱. **한글 밀림 방지 v8.0 공식 로직**이 적용되어 기초 체력을 형성합니다.
+3. **`themes`**: 종목별 테마 매핑. 주도 섹터 분석의 필수 기초입니다.
+4. **`daily`**: 지수 및 종목 시세 수집. 반드시 **수정주가** 옵션을 사용하여 차트 왜곡을 방지합니다.
+5. **`fundamentals`**: **v6.0 결산 추적 엔진**. 당기순이익과 배당성향을 결합해 실시간 외 시간에도 확정 배당금을 도출합니다.
+6. **`supply`**: 외인/기관 수급 추적. 메이저의 매집 여부를 판단합니다.
+7. **`rs`**: 전 종목 상대 강도(1~99) 계산. 시장 주도주를 골라내는 핵심 필터입니다.
+8. **`screen`**: 모든 데이터를 결합한 최종 리포트 출력 및 `trade_plan` 적재.
 
-### 4.2 최종 리포트 출력
-전설의 투자자(Minervini, O'Neil) 조건에 부합하는 종목을 선별하여 출력합니다.
-```bash
-python3 run.py screen
-```
+## 5. 트러블슈팅 및 기술적 참고
 
----
+### 데이터 이상치(Outlier) 처리 규칙
+*   **영업이익률**: 100% 초과 또는 -100% 미만 데이터는 `0`으로 자동 캡핑 처리됨.
+*   **ROE**: KIS API 특유의 날짜 접두어(202312...)가 포함된 경우 자동으로 숫자를 파싱하며, 비현실적인 수치는 무시함.
+*   **차트 스케일**: 수정주가 미반영으로 인해 주가가 5배 이상 튀는 봉은 차트 가독성을 위해 최근 가격으로 보정 렌더링됨.
 
-## 5. 트러블슈팅 (FAQ)
-
-### Q. 리포트에 종목이 하나도 안 나와요.
-1. **시세 데이터 부족**: `python run.py daily`가 정상적으로 완료되었는지 확인하세요. (최소 200일치 데이터 필요)
-2. **필수 데이터 누락**: 펀더멘털(흑자 여부)이나 배당 데이터가 없으면 필터링될 수 있습니다. `run.py fundamentals`를 실행했는지 확인하세요.
-3. **시장 상황**: 정말로 살 종목이 없을 수도 있습니다. (시장 하락장 등)
-
-### Q. "Unknown" 이라고 뜨는 항목이 있어요.
-*   **수급(Unknown)**: `run.py supply`를 실행하여 외국인/기관 데이터를 채워주세요.
-*   **테마(Unknown)**: `run.py themes`를 실행하여 테마 정보를 동기화하세요.
-
-### Q. 백그라운드 프로세스가 자꾸 죽어요 ("Bad file descriptor").
-*   `nohup` 실행 시 `< /dev/null`을 끝에 붙여주세요. 파이썬이 백그라운드에서 표준 입력을 찾지 못해 죽는 현상입니다.
-    *   `nohup python3 -u run.py ... > log 2>&1 < /dev/null &`
-
----
-
-## 6. 개발 가이드 (For Developers)
-*   **새로운 기능 추가**: `src/` 하위에 모듈을 만들고, `run.py`의 `COMMANDS`와 `runners` 딕셔너리에 등록하세요.
-*   **날짜 로직**: KIS API 호출 시 조회 기간(`F_DT`, `T_DT`)을 하드코딩하지 말고 `datetime`을 사용하여 동적으로 처리하세요.
+### 차트가 안 보일 경우 (Safari 특화)
+*   사파리 브라우저의 레이아웃 엔진 특성을 고려하여 차트 영역에 **고정 높이(300px)**를 강제 적용했습니다.
+*   데이터 로딩 중에는 `SYNCING...` 애니메이션이 표시됩니다.
+*   콘솔(F12)에서 `Points: 100` 로그가 찍히는지 확인하여 데이터 유입 여부를 점검하십시오.

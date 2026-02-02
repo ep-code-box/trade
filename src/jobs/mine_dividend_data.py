@@ -8,16 +8,20 @@ from src.db import get_connection
 from src.kis_api import kis_get_raw_async
 
 async def fetch_dividend_sector_async(market_gb, sector_code):
-    """비동기 업종별 배당 데이터 수집"""
+    """비동기 업종별 배당 데이터 수집 (최근 365일 Trailing Window)"""
     path = "/uapi/domestic-stock/v1/ranking/dividend-rate"
-    now = datetime.now().strftime("%Y%m%d")
-    f_dt = str(int(now[:4]) - 1) + "0101" # 작년 1월 1일부터
+    
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    # [Trailing 12 Months] 오늘로부터 정확히 1년 전부터 조회
+    f_dt = (now - timedelta(days=365)).strftime("%Y%m%d")
+    t_dt = now.strftime("%Y%m%d")
     
     params = {
         "CTS_AREA": "", "GB1": market_gb, "UPJONG": sector_code,
-        "GB2": "0", "GB3": "2", "F_DT": f_dt, "T_DT": now, "GB4": "0",
+        "GB2": "0", "GB3": "2", "F_DT": f_dt, "T_DT": t_dt, "GB4": "0",
     }
-    # [v3.3] 광속 비동기 호출
+    # [v3.5] 실시간 배당 이력 수집
     data = await kis_get_raw_async(path, params=params, tr_id="HHKDB13470100", use_real=True)
     return (data.get("output") or []) if data else []
 
@@ -28,14 +32,14 @@ def save_mining_results(summary):
     cur = conn.cursor()
     updated = 0
     for code, info in summary.items():
-        count = len(info["dps_list"])
         total_dps = info["total_dps"]
-        cycle = "월배당" if count >= 10 else "분기배당" if count >= 4 else "반기배당" if count >= 2 else "연배당"
+        count = len(info["dps_list"])
+        cycle = "분기/월" if count >= 4 else "반기배당" if count >= 2 else "연배당"
         
-        # master_info 업데이트 (정적 정보)
+        # 1. master_info 업데이트 (DPS 원본 보존)
         cur.execute("UPDATE master_info SET per_stock_dvdn_amt = ?, dividend_cycle = ?, dividend_count = ? WHERE code = ?", (total_dps, cycle, count, code))
         
-        # daily_analysis 업데이트 (동적 수익률)
+        # 2. daily_analysis 업데이트 (오늘 주가 기준 실시간 수익률 계산)
         cur.execute("""
             UPDATE daily_analysis 
             SET dividend_yield = (CAST(? AS REAL) / NULLIF(close, 0)) * 100 
@@ -49,21 +53,21 @@ def save_mining_results(summary):
 
 async def main_async():
     if not get_access_token(): return
-    print("🚀 [v3.3] 전 종목 배당 마이닝 작전 개시 (Target: 30 TPS)")
+    print("🚀 [v3.6] 전 시장(KOSPI/KOSDAQ) 배당 마이닝 대작전 개시 (Target: 30 TPS)")
     
-    # 1. 스캔할 업종 목록 확보 (코스피: '1', 코스닥: '3')
+    # 1. 전 시장 업종 목록 확보 (코스피: '1', 코스닥: '3')
     sectors = []
-    # 코스피 업종 (0001~0999)
-    for i in range(1, 100): sectors.append(("1", f"{i:04d}"))
-    # 코스닥 업종 (1001~1999)
-    for i in range(1, 100): sectors.append(("3", f"{1000+i:04d}"))
+    # 코스피 전 업종 (0001 ~ 0999)
+    for i in range(1, 1000): sectors.append(("1", f"{i:04d}"))
+    # 코스닥 전 업종 (1001 ~ 1999)
+    for i in range(1, 1000): sectors.append(("3", f"{1000+i:04d}"))
     
     start_time = time.time()
     all_raw_data = []
     completed = 0
     
-    # 2. 비동기 업종 스캔
-    sem = asyncio.Semaphore(50)
+    # 2. 비동기 업종 스캔 (병렬 수준 최적화)
+    sem = asyncio.Semaphore(100)
     async def task(m, s):
         async with sem: return await fetch_dividend_sector_async(m, s)
 
@@ -75,14 +79,28 @@ async def main_async():
         if completed % 20 == 0:
             print(f"[{completed}/{len(sectors)}] 업종 스캔 중... (속도: {completed/(time.time()-start_time):.1f} TPS)")
 
-    # 3. 데이터 정제
+    # 3. 데이터 정제 (실무형 중복 제거 및 연간 합산)
     print(f"\n📊 데이터 정제 중... (수집된 원시 행: {len(all_raw_data)})")
     summary = {}
+    unique_events = set() # (종목코드, 기준일, 배당금, 배당률) 고유 이벤트 관리
+    
     for item in all_raw_data:
         code = item.get("sht_cd", "").strip()
-        if not code: continue
         dps = int(item.get("per_sto_divi_amt", 0))
-        if code not in summary: summary[code] = {"dps_list": [], "total_dps": 0}
+        b_date = item.get("base_dt", "00000000")
+        y_rate = item.get("divi_rate", "0") # 배당률
+        
+        if not code or dps <= 0: continue
+        
+        # [실무 규칙] (코드, 기준일, 금액, 배당률)이 모두 같아야만 동일한 배당 이벤트로 간주
+        event_key = (code, b_date, dps, y_rate)
+        if event_key in unique_events:
+            continue
+        unique_events.add(event_key)
+        
+        if code not in summary: 
+            summary[code] = {"dps_list": [], "total_dps": 0}
+        
         summary[code]["dps_list"].append(dps)
         summary[code]["total_dps"] += dps
 
