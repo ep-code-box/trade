@@ -2,8 +2,8 @@
 
 ## 1. Core Databases
 
-### A. `stock_info.db` (Market Intelligence)
-The primary data store for technical and fundamental analysis across 3,800+ stocks.
+### A. `stock_info.db` (Market Intelligence & Execution)
+The primary data store for technical analysis, fundamental data, and trade management across 3,800+ stocks.
 
 #### 1. `master_info` (Extended Stock Master)
 *   **Purpose:** Comprehensive metadata for every stock, parsed from KIS `.mst` files.
@@ -13,14 +13,15 @@ The primary data store for technical and fundamental analysis across 3,800+ stoc
     *   `per_stock_dvdn_amt`: Annualized Dividend Per Share (Reverse-engineered from yield/close).
     *   `dividend_cycle`: Identified as 'Quarterly/Monthly', 'Semi-annual', or 'Annual'.
     *   `dividend_count`: Number of dividend events in the past year.
-    *   `roe`, `sale_account`, `thtr_ntin`: Core fundamental metrics.
+    *   `per`, `pbr`, `roe`, `bsop_prfi`, `thtr_ntin`: Core fundamental metrics.
     *   `updated_at`: Timestamp of the last metadata sync.
 
 #### 2. `daily_analysis` (Rich Time-Series Data)
-*   **Purpose:** Stores daily OHLCV and calculated quantitative indicators.
+*   **Purpose:** Stores daily OHLCV, calculated quantitative indicators, and investor supply data.
 *   **Columns:**
     *   `date`, `code` (Composite PK).
     *   `open`, `high`, `low`, `close`, `volume`, `amount`: Raw market data.
+    *   `frgn_net_buy`, `orgn_net_buy`, `pension_net_buy`: Investor supply breakdown (Added in v2.5).
     *   `sma_20`, `sma_50`, `sma_150`, `sma_200`: Moving averages for Trend Template.
     *   `volume_sma_50`: Volume moving average for Dry-up detection.
     *   `rs_score`: Relative Strength percentile rank (1-99).
@@ -32,14 +33,17 @@ The primary data store for technical and fundamental analysis across 3,800+ stoc
 *   **Purpose:** Maps stocks to WICS sectors and dynamic themes.
 *   **Source:** KIS `idxcode.mst` and `theme_code.mst`.
 
----
+#### 4. `trade_plan` (Strategy Execution)
+*   **Purpose:** Manages the pipeline of potential trades selected by the screener.
+*   **Columns:**
+    *   `date`, `code`: Identification.
+    *   `entry_price`, `stop_price`: Calculated risk parameters (e.g., Pivot Point, Box Bottom).
+    *   `weight`: Portfolio allocation strategy (e.g., "15%").
+    *   `status`: State machine (`READY` -> `SUBMITTED` -> `FILLED` / `CANCELLED`).
 
-### B. `user_info.db` (Portfolio & Audit)
-Manages user-specific data and enforces trading discipline.
-
-*   **`account_config`:** 2-Track account segregation.
-*   **`trade_history`:** Execution records with strategy tags (e.g., 'VCP_BREAKOUT').
-*   **`audit_log`:** Logs violations of the 1% risk rule or mentor critiques.
+#### 5. `trade_execution` (Audit Trail)
+*   **Purpose:** Immutable record of all executed trades via the API.
+*   **Columns:** `timestamp`, `code`, `side` (BUY/SELL), `qty`, `price`, `result_msg`.
 
 ---
 
@@ -56,9 +60,11 @@ Calculated across all 3,800+ stocks using a weighted formula:
 
 ### 3. Dividend Annualization
 *   DPS is aggregated from all dividend events within a 1-year window to handle quarterly/monthly payouts correctly.
+*   Yield Goal: Annualized yield > 7% (Revised for high-rate environment).
 
 ---
 
 ## 3. Data Integrity Principles
 *   **Load then Filter:** All indicators are calculated and stored for all stocks. Filtering is done at the query level (Views/Direct SQL) to allow flexible strategy adjustments.
 *   **Full History Recalculation:** The `recalc` job ensures that moving averages and slopes are consistent across the entire 2-year history, eliminating "cold start" issues for slope analysis.
+*   **Single Source of Truth:** `stock_info.db` acts as the unified repository for both market data and user trading records (Merged from `user_info.db`).

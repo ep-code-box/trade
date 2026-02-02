@@ -6,9 +6,14 @@ from src.kis_api import kis_get_raw
 
 def fetch_dividend_by_sector(market_gb, sector_code):
     path = "/uapi/domestic-stock/v1/ranking/dividend-rate"
+    from datetime import datetime
+    now = datetime.now().strftime("%Y%m%d")
+    # 작년 1월 1일부터 오늘까지
+    f_dt = str(int(now[:4]) - 1) + "0101"
+    
     params = {
         "CTS_AREA": "", "GB1": market_gb, "UPJONG": sector_code,
-        "GB2": "0", "GB3": "2", "F_DT": "20240101", "T_DT": "20241231", "GB4": "0",
+        "GB2": "0", "GB3": "2", "F_DT": f_dt, "T_DT": now, "GB4": "0",
     }
     data = kis_get_raw(path, params=params, tr_id="HHKDB13470100", use_real=True, delay=0.05)
     return (data.get("output") or []) if data else []

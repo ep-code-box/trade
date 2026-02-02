@@ -8,9 +8,13 @@ from src.kis_api import kis_get_raw
 
 def fetch_dividend_rank(market_gb="1", dividend_gb="0"):
     path = "/uapi/domestic-stock/v1/ranking/dividend-rate"
+    now = datetime.now().strftime("%Y%m%d")
+    # 조회 기간을 작년 1월 1일부터 오늘까지로 넓게 설정
+    f_dt = str(int(now[:4]) - 1) + "0101"
+    
     params = {
         "CTS_AREA": "", "GB1": market_gb, "UPJONG": "0001",
-        "GB2": "0", "GB3": "2", "F_DT": "20240101", "T_DT": "20241231", "GB4": dividend_gb,
+        "GB2": "0", "GB3": "2", "F_DT": f_dt, "T_DT": now, "GB4": dividend_gb,
     }
     data = kis_get_raw(path, params=params, tr_id="HHKDB13470100", use_real=True, delay=0.1)
     if not data:

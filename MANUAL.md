@@ -1,127 +1,100 @@
-# Trade (TrendHunter) 실행 메뉴얼
+# TrendHunter Operation Manual
 
-> **기능 정리:** `FUNCTIONALITY_MAP.md` | **운영 흐름·GCP 배포:** `ROADMAP.md`
-
----
-
-## 1. 환경 설정
-
-- **Python:** 3.x, 가상환경 권장 (`python -m venv .venv`)
-- **의존성:** `pip install -r requirements.txt`
-- **환경 변수:** `.env`에 `APP_KEY`, `APP_SECRET`, `MODE`(real/vts) 설정
-- **토큰:** KIS API 토큰은 `auth_helper`가 `kis_token.json`에 저장·재사용  
-  (리팩토링 후: `src.auth` 사용 시 동일 경로)
+이 문서는 TrendHunter 시스템의 설치, 초기화, 운영, 그리고 문제 해결을 위한 통합 가이드입니다.
+(최종 업데이트: 2026-02-02)
 
 ---
 
-## 2. DB 스키마 요약
+## 1. 시스템 개요
+TrendHunter는 KIS API를 기반으로 한국 주식 시장(KOSPI, KOSDAQ)의 전 종목 데이터를 수집하고, 정량적 전략(Minervini Trend, Dividend Growth 등)에 따라 유망 종목을 발굴하는 시스템입니다.
 
-- 상세: `DB_DESIGN.md`, 실제 사용 컬럼: `FUNCTIONALITY_MAP.md` §8
-- **stock_info.db:** `master_info`, `daily_analysis`, `sectors_themes`
-- **초기화:** `python db_manager.py` 또는 `python run_init.py` (리팩토링 경로: `src.db` 사용)
-- **뷰:** `python setup_views.py` → `view_trend_candidates`, `view_dividend_candidates`
-
----
-
-## 3. 스크립트 역할 요약
-
-| 구분 | 스크립트 | 역할 (한 줄) |
-|------|----------|--------------|
-| 인프라 | auth_helper.py | KIS 토큰 발급·저장 |
-| 인프라 | db_manager.py | DB 테이블 생성 |
-| 인프라 | setup_views.py | Track1/Track2 뷰 생성 |
-| 동기화 | db_sync.py | KOSPI/KOSDAQ 마스터 → master_info |
-| 동기화 | db_sync_themes.py | DWS 업종/테마 ZIP → sectors_themes |
-| 수집 | fetch_daily_price.py | 일봉·지표 → daily_analysis |
-| 수집 | fetch_stock_fundamentals.py | PER/PBR 등 → master_info |
-| 수집 | fetch_dividend_* | 배당 DPS/수익률 → master_info, daily_analysis |
-| 수집 | mine_dividend_* | 전수/업종별 배당 → master_info, daily_analysis |
-| 태깅 | tag_dividend_cycles*.py | 배당 빈도 → dividend_cycle, dividend_count |
-| 분석 | calc_rs_score.py | RS 점수 → daily_analysis(최신일) |
-| 분석 | recalc_indicators.py | SMA·vol_std 등 전량 재계산 |
-| 분석 | screen_market.py | Track1/Track2 리포트 출력 |
-| 스크립트 | compare_*, check_*, debug_*, test_* | 비교·검증·디버그 |
-
-상세(입력/출력/의존성): `FUNCTIONALITY_MAP.md`
+### 핵심 디렉토리 구조
+*   `src/`: 소스 코드 (진입점 `run.py`가 이를 호출)
+    *   `jobs/`: 데이터 수집 (API -> DB)
+    *   `analysis/`: 데이터 분석 및 리포트 (DB -> Console)
+    *   `db/`: DB 스키마 및 연결 관리
+*   `TrendHunter/db/stock_info.db`: 메인 데이터베이스 (SQLite)
 
 ---
 
-## 4. 실행 흐름 (권장 순서)
+## 2. 초기화 (Reset & Init)
+데이터베이스가 꼬였거나 처음부터 다시 시작해야 할 때 수행합니다.
 
-### 4.1 최초 1회
-1. `.env` 설정, `pip install -r requirements.txt`
-2. `python db_manager.py` — 테이블 생성
-3. `python setup_views.py` — 뷰 생성 (데이터 없으면 뷰는 빈 결과)
-4. **마스터:** `kospi_code.mst`, `kosdaq_code.mst` 준비 후 `python db_sync.py`
-5. **테마:** `python db_sync_themes.py` (DWS에서 idxcode.mst, theme_code.mst 다운로드)
-6. **일봉:** `python fetch_daily_price.py` — 전 종목 일봉·지표 수집
-7. **RS:** `python calc_rs_score.py` — 최신일 RS 점수
-8. **배당:** 아래 4.2 중 하나 이상 실행
-9. `python setup_views.py` 재실행 (데이터 반영 후 뷰 갱신)
-10. `python screen_market.py` — 리포트 확인
+```bash
+# 1. 기존 DB 삭제
+rm -f TrendHunter/db/stock_info.db
 
-### 4.2 배당 데이터 채우기 (택일 또는 조합)
-- **순위 API 일괄:** `python fetch_dividend_all.py` 또는 `python fetch_high_dividend_rank.py`
-- **종목별 기본정보(실전):** `python fetch_dividend_info_final.py` 또는 `python mine_dividend_full_sweep.py`
-- **배당 주기 태깅:** `python tag_dividend_cycles.py` 또는 `tag_dividend_cycles_full.py` 또는 `tag_dividend_cycles_ultimate.py`
-
-### 4.3 일일 배치 (예시)
-1. `python fetch_daily_price.py` — 일봉 갱신
-2. `python calc_rs_score.py` — RS 갱신
-3. (선택) 배당 수집/태깅
-4. `python screen_market.py` — 리포트
-
-### 4.4 수동 분석·검증
-- 스크리닝: `python screen_market.py`
-- 배당 비교: `python compare_dividend_sources.py`
-- 샘플 검증: `python check_sample_calculation.py`
-- API 디버그: `python debug_api.py`, `python fetch_dividend_debug.py`
+# 2. 필수 테이블 생성 및 기초 데이터 동기화
+# (순서 중요: init -> sync -> themes -> views)
+python3 run.py init      # 테이블(Schema) 생성
+python3 run.py sync      # 종목 코드(Master) 동기화
+python3 run.py themes    # 테마/업종 코드 동기화
+python3 run.py views     # 분석용 View 생성
+```
 
 ---
 
-## 5. 트러블슈팅
+## 3. 데이터 수집 (Daily Routine)
+데이터 수집은 시간이 오래 걸리므로 **백그라운드 실행(`nohup`)**을 권장합니다.
+특히 입출력 에러 방지를 위해 `< /dev/null` 리다이렉션을 사용하는 것이 안정적입니다.
 
-- **토큰 만료:** `kis_token.json` 삭제 후 재실행 시 재발급
-- **실전/모의 URL:** 배당 관련 API 대부분은 **실전 도메인**만 지원 → `MODE=real` 및 실전 URL 사용 스크립트 확인
-- **DB 경로:** 기본 `TrendHunter/db/stock_info.db` (루트 기준)
-- **뷰 컬럼 없음:** `view_trend_candidates`는 `volume_sma_50`, `vol_std_10d` 등 필요 → `fetch_daily_price.py` 또는 `recalc_indicators.py` 실행 후 뷰 재생성
+### 3.1 시세 수집 (가장 중요, 약 20~30분 소요)
+전 종목의 일봉, 거래량, 이동평균선을 수집합니다.
+```bash
+nohup python3 -u run.py daily > fetch_daily.log 2>&1 < /dev/null &
+# 진행 상황 확인: tail -f fetch_daily.log
+```
+
+### 3.2 보조 데이터 수집 (병렬 실행 가능)
+시세 수집과 동시에 돌려도 됩니다. 리포트의 필터링(흑자 여부, 배당률, 수급)에 필수적입니다.
+
+```bash
+# 1. 펀더멘털 (PER, PBR, 영업이익 등)
+nohup python3 -u run.py fundamentals > fetch_fund.log 2>&1 < /dev/null &
+
+# 2. 배당 정보 (업종별 마이닝 - 시간이 좀 걸림)
+nohup python3 -u run.py mine > fetch_div.log 2>&1 < /dev/null &
+
+# 3. 수급 정보 (외국인/기관 매매동향 - 선택 사항)
+nohup python3 -u run.py supply > fetch_supply.log 2>&1 < /dev/null &
+```
 
 ---
 
+## 4. 분석 및 리포트 (Reporting)
+데이터 수집이 완료된 후 실행합니다.
+
+### 4.1 RS 점수 계산 (필수)
+상대 강도(Relative Strength) 점수를 계산하여 `daily_analysis` 테이블에 업데이트합니다.
+```bash
+python3 run.py rs
+```
+
+### 4.2 최종 리포트 출력
+전설의 투자자(Minervini, O'Neil) 조건에 부합하는 종목을 선별하여 출력합니다.
+```bash
+python3 run.py screen
+```
+
 ---
 
-## 6. 리팩토링 후 실행 (공통 모듈 사용)
+## 5. 트러블슈팅 (FAQ)
 
-**통합 CLI:** `python run.py` (명령 없이 실행 시 목록), `python run.py <명령>`  
-예: `python run.py init`, `python run.py daily`, `python run.py screen`
+### Q. 리포트에 종목이 하나도 안 나와요.
+1. **시세 데이터 부족**: `python run.py daily`가 정상적으로 완료되었는지 확인하세요. (최소 200일치 데이터 필요)
+2. **필수 데이터 누락**: 펀더멘털(흑자 여부)이나 배당 데이터가 없으면 필터링될 수 있습니다. `run.py fundamentals`를 실행했는지 확인하세요.
+3. **시장 상황**: 정말로 살 종목이 없을 수도 있습니다. (시장 하락장 등)
 
-| 명령 | 설명 |
-|------|------|
-| init | DB 테이블 생성 |
-| views | Track1/Track2 뷰 생성 |
-| sync | 마스터 동기화 (kospi_code.mst, kosdaq_code.mst) |
-| themes | 테마/업종 동기화 (DWS 다운로드) |
-| daily | 일봉 수집 |
-| fundamentals | 펀더멘털 수집 |
-| dividend | 배당 DPS(실전) |
-| dividend-all | 배당 순위 일괄 |
-| dividend-rank | 고배당 순위 |
-| mine | 업종별 배당 마이닝 |
-| mine-sweep | 전 종목 배당 전수 |
-| tag | 배당 주기 태깅 |
-| tag-full | 예탁원 배당일정 태깅 |
-| tag-ultimate | 업종별 배당 태깅 |
-| rs | RS 점수 계산 |
-| recalc | 지표 전량 재계산 |
-| screen | Track1/Track2 리포트 |
-| compare | 배당 소스 비교 |
-| check | 샘플 검증 |
-| debug | API 디버그 |
-| test-div | 배당 샘플 테스트 |
+### Q. "Unknown" 이라고 뜨는 항목이 있어요.
+*   **수급(Unknown)**: `run.py supply`를 실행하여 외국인/기관 데이터를 채워주세요.
+*   **테마(Unknown)**: `run.py themes`를 실행하여 테마 정보를 동기화하세요.
 
-**모듈 직접 실행:** `python -m src.jobs.fetch_daily_price`, `python -m src.analysis.screen_market` 등 (위 표와 동일 기능).
+### Q. 백그라운드 프로세스가 자꾸 죽어요 ("Bad file descriptor").
+*   `nohup` 실행 시 `< /dev/null`을 끝에 붙여주세요. 파이썬이 백그라운드에서 표준 입력을 찾지 못해 죽는 현상입니다.
+    *   `nohup python3 -u run.py ... > log 2>&1 < /dev/null &`
 
-- **공통 모듈:** `src/config.py`, `src/auth.py`, `src/kis_api.py`, `src/db/`
-- **기존 루트 스크립트:** 삭제 완료. 실행은 `run.py`·`src` 모듈만 사용.
+---
 
-*기능 상세: `FUNCTIONALITY_MAP.md` | 리팩토링 계획: `REFACTOR_PLAN.md`*
+## 6. 개발 가이드 (For Developers)
+*   **새로운 기능 추가**: `src/` 하위에 모듈을 만들고, `run.py`의 `COMMANDS`와 `runners` 딕셔너리에 등록하세요.
+*   **날짜 로직**: KIS API 호출 시 조회 기간(`F_DT`, `T_DT`)을 하드코딩하지 말고 `datetime`을 사용하여 동적으로 처리하세요.

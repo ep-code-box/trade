@@ -106,7 +106,10 @@ def init_dbs():
 
     cursor_stock.execute('''
         CREATE TABLE IF NOT EXISTS daily_analysis (
-            date TEXT, code TEXT, close INTEGER, volume INTEGER, amount INTEGER,
+            date TEXT, code TEXT, open INTEGER, high INTEGER, low INTEGER, close INTEGER, 
+            volume INTEGER, amount INTEGER, 
+            frgn_net_buy INTEGER, orgn_net_buy INTEGER, prsn_net_buy INTEGER,
+            fin_net_buy INTEGER, inv_net_buy INTEGER, pension_net_buy INTEGER, etc_net_buy INTEGER,
             market_cap INTEGER, sma_20 REAL, sma_50 REAL, sma_150 REAL, sma_200 REAL,
             high_52w INTEGER, low_52w INTEGER, rs_score REAL,
             vol_std_10d REAL, vol_std_50d REAL, dividend_yield REAL,
@@ -123,6 +126,34 @@ def init_dbs():
             category_type TEXT,
             category_name TEXT,
             source TEXT,
+            FOREIGN KEY(code) REFERENCES master_info(code)
+        )
+    ''')
+
+    cursor_stock.execute('''
+        CREATE TABLE IF NOT EXISTS trade_plan (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            date TEXT,
+            code TEXT,
+            name TEXT,
+            entry_price INTEGER,
+            stop_price INTEGER,
+            weight TEXT,
+            status TEXT DEFAULT 'READY', -- READY, SUBMITTED, FILLED, CANCELLED, STOPPED
+            FOREIGN KEY(code) REFERENCES master_info(code)
+        )
+    ''')
+
+    cursor_stock.execute('''
+        CREATE TABLE IF NOT EXISTS trade_execution (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            code TEXT,
+            side TEXT, -- BUY, SELL
+            qty INTEGER,
+            price INTEGER,
+            result_msg TEXT,
             FOREIGN KEY(code) REFERENCES master_info(code)
         )
     ''')

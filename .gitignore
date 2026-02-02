@@ -28,3 +28,7 @@ kis_token.json
 *.db-shm
 *.db-wal
 TrendHunter_AI/db/
+
+# Logs
+logs/
+*.log
