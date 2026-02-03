@@ -1,10 +1,10 @@
-"Track1/Track EX/Track2 통합 리포트 v4.5 (거장의 철학 + 정석 엔진 통합)."
+"Track1/Track EX/Track2 통합 리포트 v5.4 (Dynamic VCP: Strict 4% & Relaxed 6%)."
 import pandas as pd
 import numpy as np
 from datetime import datetime
 from src.db import get_connection
 from src.analysis.market_filter import check_market_health
-from collections import Counter
+from collections import Counter, defaultdict
 
 def get_themes_for_stock(code):
     conn = get_connection()
@@ -13,22 +13,36 @@ def get_themes_for_stock(code):
     return df["category_name"].tolist()
 
 def get_supply_quality(code):
+    """수급 질적 분석: 쌍끌이(외인+기관) 및 매집 강도 체크"""
     conn = get_connection()
     df = pd.read_sql_query(f"SELECT close, open, frgn_net_buy, orgn_net_buy FROM daily_analysis WHERE code = '{code}' ORDER BY date DESC LIMIT 5", conn)
     conn.close()
     if df.empty or df['frgn_net_buy'].isnull().all(): return "Unknown"
+    
     for col in ['close', 'open', 'frgn_net_buy', 'orgn_net_buy']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    # 5일 합산 수급
+    total_frgn = df['frgn_net_buy'].sum()
+    total_orgn = df['orgn_net_buy'].sum()
+    
+    # 쌍끌이 체크
+    is_both_buying = total_frgn > 0 and total_orgn > 0
+    
     df['is_up'] = df['close'] > df['open']
     up_days = df[df['is_up']]
     down_days = df[~df['is_up']]
     up_supply = (up_days['frgn_net_buy'].sum() + up_days['orgn_net_buy'].sum()) if not up_days.empty else 0
     down_supply = abs(down_days['frgn_net_buy'].sum() + down_days['orgn_net_buy'].sum()) if not down_days.empty else 0
-    total_net = df['frgn_net_buy'].sum() + df['orgn_net_buy'].sum()
-    if up_supply > down_supply * 1.2: return "🌟 공격적매집"
-    if total_net > 0: return "✅ 수급우량"
-    if total_net < 0: return "🚨 수급이탈"
-    return "👤 개인주도"
+    
+    status = ""
+    if is_both_buying: status = "💎 쌍끌이매집"
+    elif up_supply > down_supply * 1.5: status = "🌟 공격적매집"
+    elif (total_frgn + total_orgn) > 0: status = "✅ 수급우량"
+    elif (total_frgn + total_orgn) < 0: status = "🚨 수급이탈"
+    else: status = "👤 개인주도"
+    
+    return status
 
 def get_tick_size(price):
     if price < 2000: return 1
@@ -44,44 +58,69 @@ def adjust_to_tick(price, method='up'):
     else: return (int(price) // tick) * tick
 
 def get_breakout_price(high_52w):
-    return adjust_to_tick(high_52w * 1.005, 'up')
+    """정조준 진입가: 52주 신고가 + 0.5% 돌파 & 라운드 피겨 보정"""
+    target = high_52w * 1.005
+    
+    # 라운드 피겨(심리적 저항선) 보정 로직 복원
+    if 98000 <= target < 100000: target = 100500
+    elif 48000 <= target < 50000: target = 50500
+    elif 9800 <= target < 10000: target = 10100
+    elif 4900 <= target < 5000: target = 5050
+    
+    return adjust_to_tick(target, 'up')
 
-def check_chart_pattern(code):
+def check_chart_pattern_score(code):
+    """거장의 VCP 검증: 변동성 수축 수치(Tightness Score)를 반환"""
     conn = get_connection()
-    df = pd.read_sql_query(f"SELECT open, high, low, close FROM daily_analysis WHERE code = '{code}' ORDER BY date DESC LIMIT 5", conn)
+    df = pd.read_sql_query(f"SELECT high, low, close FROM daily_analysis WHERE code = '{code}' ORDER BY date DESC LIMIT 10", conn)
     conn.close()
-    if len(df) < 5: return False
-    for col in ['open', 'high', 'low', 'close']: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    recent = df.head(5)
-    if ((recent['high'] - recent['low']) / recent['close']).mean() > 0.06: return False
-    recent_shadow = recent.apply(lambda x: (x['high'] - x['close']) if x['close'] > x['open'] else (x['high'] - x['open']), axis=1)
-    if (recent_shadow / recent['close']).mean() > 0.03: return False
-    return True
+    if len(df) < 10: return 999.0 # 데이터 부족
+    
+    for col in ['high', 'low', 'close']: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    df['range_pct'] = (df['high'] - df['low']) / df['close']
+    
+    recent_5d = df.head(5)
+    prev_5d = df.iloc[5:10]
+    
+    score = recent_5d['range_pct'].mean()
+    
+    # 변동성 추세 체크: 최근이 이전보다 크게 벌어졌으면 제외 (1.1배 허용)
+    if score > prev_5d['range_pct'].mean() * 1.1: return 999.0
+    
+    return score
 
 def get_trend_candidates_db():
+    """정조준 필터 v5.2: 200일선 우상향 기울기 + 완전정배열 + VDU"""
     conn = get_connection()
     res = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()
     if not res or not res[0]:
         conn.close(); return pd.DataFrame()
     max_date = res[0]
     
-    # [v4.5 통합 필터] 기존 정석 조건 + RS 90 상향
+    # 1개월(20거래일) 전 날짜 구하기
+    prev_date_res = conn.execute(f"SELECT date FROM daily_analysis WHERE code='0001' AND date < '{max_date}' ORDER BY date DESC LIMIT 20, 1").fetchone()
+    prev_date = prev_date_res[0] if prev_date_res else '00000000'
+    
     query = f"""
     SELECT 
         d.date, d.code, m.name, m.market_type,
         d.close, d.amount, d.volume, d.rs_score,
         (d.vol_std_10d / d.vol_std_50d) as vcp_ratio,
         d.high_52w, d.low_52w, d.sma_20, d.sma_50, d.sma_150, d.sma_200,
-        d.volume_sma_50, m.bsop_prfi, m.thtr_ntin, m.roe, m.sale_account
+        d.volume_sma_50, m.roe, m.bsop_prfi, m.thtr_ntin,
+        (SELECT d2.sma_200 FROM daily_analysis d2 WHERE d2.code = d.code AND d2.date = '{prev_date}') as sma_200_prev
     FROM daily_analysis d
     JOIN master_info m ON d.code = m.code
     WHERE d.date = '{max_date}'
       AND d.amount >= 3000000000
-      AND d.close > d.sma_50 AND d.sma_50 > d.sma_150 AND d.sma_150 > d.sma_200
-      AND d.close >= d.low_52w * 1.25
-      AND d.close >= d.high_52w * 0.80
-      AND d.rs_score >= 90
-      AND (d.vol_std_10d / d.vol_std_50d) < 0.9
+      -- [거장의 필터] 200일선이 최소 1개월 전보다 높아야 함 (상승 기울기)
+      AND d.sma_200 > sma_200_prev
+      -- [완전 정배열] 가격 > 20 > 50 > 150 > 200
+      AND d.close > d.sma_20 AND d.sma_20 > d.sma_50 AND d.sma_50 > d.sma_150 AND d.sma_150 > d.sma_200
+      -- [VDU 필터] 거래량 건조 (평균의 80% 미만)
+      AND d.volume < (d.volume_sma_50 * 0.8)
+      AND d.rs_score >= 80
+      AND ((m.bsop_prfi > 0 AND m.thtr_ntin > 0) OR (d.rs_score >= 90))
     ORDER BY d.rs_score DESC
     """
     df = pd.read_sql_query(query, conn)
@@ -94,99 +133,100 @@ def calculate_survival_trade(row):
     stop_sma20 = row['sma_20'] or 0
     stop = max(stop_fixed, stop_sma20)
     stop = adjust_to_tick(stop, 'down')
-    
-    # [스승의 필터] 손절선 붕괴 여부
     is_broken = row['close'] < stop
-    
     risk_pct = (entry - stop) / entry if entry > stop else 0.07
     weight = min(20, int(1.0 / risk_pct))
-    
     return entry, stop, f"{weight}%", is_broken
 
-def save_to_trade_plan(candidates, track_name="TRACK 1"):
-    if not candidates: return
-    conn = get_connection()
-    cursor = conn.cursor()
-    today = datetime.now().strftime('%Y-%m-%d')
-    for row in candidates:
-        entry, stop, weight, is_broken = calculate_survival_trade(row)
-        vcp = row.get('vcp_ratio', 0)
-        
-        # [v4.5] 거장들의 잣대 적용 상태값
-        if is_broken: status = 'CANCEL'
-        elif vcp > 0.1: status = 'WATCH'
-        else: status = 'READY'
-        
-        rationale = f"RS {row['rs_score']:.1f} | VCP {vcp:.2f} | " + \
-                    ("추세 붕괴(매도)" if is_broken else "변동성 수축 대기" if vcp > 0.1 else "돌파 임박")
-        
-        cursor.execute("SELECT id FROM trade_plan WHERE date = ? AND code = ?", (today, row['code']))
-        if cursor.fetchone():
-            cursor.execute("""
-                UPDATE trade_plan SET entry_price=?, stop_price=?, weight=?, status=?,
-                track=?, rs_score=?, vcp_ratio=?, rationale=? WHERE date=? AND code=?
-            """, (entry, stop, weight, status, track_name, row['rs_score'], vcp, rationale, today, row['code']))
-        else:
-            cursor.execute("""
-                INSERT INTO trade_plan (date, code, name, entry_price, stop_price, weight, status, track, rs_score, vcp_ratio, rationale) 
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
-            """, (today, row['code'], row['name'], entry, stop, weight, status, track_name, row['rs_score'], vcp, rationale))
-    conn.commit()
-    conn.close()
+def print_stock_row(row):
+    e, s, w, brk = calculate_survival_trade(row)
+    mark = "🚨" if brk else "⏳" if row['vcp_ratio'] > 0.15 else "🎯"
+    quality = row.get('quality', 'Unknown')
+    # 쌍끌이인 경우 이름 강조
+    name_display = f"*{row['name']}" if "💎" in quality else row['name']
+    print(f" {mark} {name_display:<12} | RS {row['rs_score']:2.0f} | {quality} | VCP {row['vcp_ratio']:.2f} | 🎯:{e:>8,} | 🛡️:{s:>8,}")
 
 def generate_full_report():
-    print("-" * 105)
-    print(f" [TrendHunter v4.5 Master's Soul] 거장의 원칙과 정석 로직의 결합 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("-" * 105)
+    conn = get_connection()
+    max_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
     
+    print("=" * 105)
+    print(f" [TrendHunter v5.4 Dynamic Master] 정조준 및 유연한 VCP 리포트 | {max_date}")
+    print("=" * 105)
+    
+    # 1. 시장 온도계
+    kospi = conn.execute(f"SELECT close, sma_50, sma_200 FROM daily_analysis WHERE code='0001' AND date='{max_date}'").fetchone()
+    kosdaq = conn.execute(f"SELECT close, sma_50, sma_200 FROM daily_analysis WHERE code='1001' AND date='{max_date}'").fetchone()
+    
+    if kospi and kosdaq:
+        p_status = "UP" if kospi[0] > kospi[1] else "DOWN"
+        q_status = "UP" if kosdaq[0] > kosdaq[1] else "DOWN"
+        print(f" 🌡️ 시장 상태: KOSPI {p_status} ({kospi[0]:,.0f}) | KOSDAQ {q_status} ({kosdaq[0]:,.0f})")
+    
+    total_cnt = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{max_date}' AND rs_score IS NOT NULL").fetchone()[0]
+    stage2_cnt = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{max_date}' AND close > sma_50 AND sma_50 > sma_150 AND sma_150 > sma_200").fetchone()[0]
+    stage2_pct = (stage2_cnt / total_cnt * 100) if total_cnt > 0 else 0
+    print(f" 🔥 시장 열기: Stage 2 비율 {stage2_pct:.1f}%")
+    print("-" * 105)
+
+    # 2. 시장 주도 섹터 사전 분석
     raw_df = get_trend_candidates_db()
-    final_list = []
+    if not raw_df.empty:
+        all_raw_themes = []
+        for code in raw_df['code'].head(50):
+            themes = get_themes_for_stock(code)
+            all_raw_themes.extend(themes)
+        common_themes = Counter(all_raw_themes).most_common(5)
+        theme_str = " | ".join([f"#{t}({c})" for t, c in common_themes])
+        print(f" 🚀 시장 주도 섹터: {theme_str}")
+        print("-" * 105)
+
+    # 3. 정밀 필터링 (Dynamic VCP)
+    strict_candidates = []
+    relaxed_candidates = []
     
     if not raw_df.empty:
         for _, row in raw_df.iterrows():
-            if check_chart_pattern(row['code']):
-                quality = get_supply_quality(row['code'])
-                if "이탈" not in quality:
-                    row['quality'] = quality
-                    final_list.append(row)
-    
-    if final_list:
-        all_themes = []
-        for row in final_list:
-            themes = get_themes_for_stock(row["code"])
-            if themes: all_themes.extend(themes)
-        top_theme = Counter(all_themes).most_common(1)[0][0] if all_themes else "독립강세"
-        
-        save_to_trade_plan(final_list, f"트랙 1: {top_theme}")
-        
-        for row in final_list:
-            e, s, w, brk = calculate_survival_trade(row)
-            mark = "🚨" if brk else "⏳" if row['vcp_ratio'] > 0.1 else "🎯"
-            print(f" {mark} {row['name']:<10} | RS {row['rs_score']:2.0f} | {row['quality']} | VCP {row['vcp_ratio']:.2f} | 🎯:{e:>7,} | 🛡️:{s:>7,}")
+            vcp_score = check_chart_pattern_score(row['code'])
+            if vcp_score <= 0.04:
+                row['vcp_score'] = vcp_score
+                row['quality'] = get_supply_quality(row['code'])
+                if "이탈" not in row['quality']:
+                    row['themes'] = get_themes_for_stock(row['code'])
+                    strict_candidates.append(row)
+            elif vcp_score <= 0.06:
+                row['vcp_score'] = vcp_score
+                row['quality'] = get_supply_quality(row['code'])
+                if "이탈" not in row['quality']:
+                    row['themes'] = get_themes_for_stock(row['code'])
+                    relaxed_candidates.append(row)
 
-        # [v4.5] 요약 테이블 업데이트
-        conn = get_connection()
-        res_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
-        total = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{res_date}'").fetchone()[0]
-        s2 = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{res_date}' AND close > sma_50 AND sma_50 > sma_150").fetchone()[0]
-        avg_rs = conn.execute(f"SELECT AVG(rs_score) FROM daily_analysis WHERE date='{res_date}'").fetchone()[0] or 0
-        conn.execute("INSERT OR REPLACE INTO market_summary (date, top_sector, active_leaders, stage2_ratio, market_rs, risk_level) VALUES (?,?,?,?,?,?)",
-                     (res_date, top_theme, len(final_list), round(s2/total*100, 1), round(avg_rs, 1), "SAFE" if avg_rs > 45 else "CAUTION"))
-        conn.commit(); conn.close()
+    final_display = []
+    if strict_candidates:
+        print(" [🎯 TRACK 1: 거장의 정조준 (Strict 4%)]")
+        final_display = strict_candidates
+    elif relaxed_candidates:
+        print(" [⚠️ TRACK 1: 현실적 차선책 (Relaxed 6%)]")
+        # 차선책은 너무 많으면 노이즈가 되므로 가장 RS 높은/수축된 3개만 추천
+        final_display = sorted(relaxed_candidates, key=lambda x: (x['vcp_score'], -x['rs_score']))[:3]
     else:
-        print("\n [!] 거장의 기준을 통과한 주도주가 없습니다. 현금을 확보하고 인내하십시오.")
+        print(" [!] 정조준 타점에 들어온 종목이 없습니다. 관망하십시오.")
 
-    # TRACK 2 복구 (v6.0 정석 배당)
-    conn = get_connection()
-    max_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
-    query_div = f"SELECT DISTINCT m.code, m.name, d.dividend_yield, m.roe FROM daily_analysis d JOIN master_info m ON d.code = m.code WHERE d.date = '{max_date}' AND d.dividend_yield >= 7.0 AND m.roe >= 10.0 ORDER BY d.dividend_yield DESC LIMIT 10"
+    if final_display:
+        for s in final_display:
+            print_stock_row(s)
+        print("-" * 105)
+
+    # TRACK 2: 고배당
+    query_div = f"SELECT DISTINCT m.code, m.name, d.dividend_yield, m.roe FROM daily_analysis d JOIN master_info m ON d.code = m.code WHERE d.date = '{max_date}' AND d.dividend_yield >= 7.0 AND m.roe >= 10.0 ORDER BY d.dividend_yield DESC LIMIT 5"
     div_df = pd.read_sql_query(query_div, conn)
     if not div_df.empty:
-        print(f"\n[🛡️ TRACK 2: 정석 고배당 (Trailing 12M)]")
+        print(f" [🛡️ TRACK 2: 정석 고배당 (Trailing 12M)]")
         for _, r in div_df.iterrows():
-            print(f" ▶ {r['name']:<10} | 배당:{r['dividend_yield']:>5.1f}% | ROE:{r['roe']:>5.1f}%")
+            print(f" ▶ {r['name']:<12} | 배당:{r['dividend_yield']:>5.1f}% | ROE:{r['roe']:>5.1f}%")
+        print("-" * 105)
+
     conn.close()
-    print("-" * 105)
 
 if __name__ == "__main__":
     generate_full_report()

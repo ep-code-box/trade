@@ -7,25 +7,39 @@ from src.kis_api import kis_get_raw
 
 def fetch_index_chart(code, start_date, end_date):
     """
-    업종/지수 일봉 조회 (FHKUP03500100)
+    업종/지수 일봉 조회 (FHKUP03500100) - 여러 번 호출하여 데이터 확보
     """
     path = "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice"
-    params = {
-        "FID_COND_MRKT_DIV_CODE": "U",
-        "FID_INPUT_ISCD": code,
-        "FID_INPUT_DATE_1": start_date,
-        "FID_INPUT_DATE_2": end_date,
-        "FID_PERIOD_DIV_CODE": "D"
-    }
-    # 딜레이를 주어 안정성 확보
-    time.sleep(0.5)
-    res = kis_get_raw(path, params=params, tr_id="FHKUP03500100")
+    all_data = []
+    current_end = end_date
     
-    if not res or "output2" not in res:
-        print(f"Failed to fetch {code}: {res}")
-        return None
-    
-    return res["output2"]
+    for i in range(4):  # 최대 400일치 (1회당 100개)
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "U",
+            "FID_INPUT_ISCD": code,
+            "FID_INPUT_DATE_1": start_date,
+            "FID_INPUT_DATE_2": current_end,
+            "FID_PERIOD_DIV_CODE": "D"
+        }
+        time.sleep(0.2)
+        res = kis_get_raw(path, params=params, tr_id="FHKUP03500100")
+        
+        if not res or "output2" not in res or not res["output2"]:
+            break
+            
+        chunk = res["output2"]
+        all_data.extend(chunk)
+        
+        if len(chunk) < 100:
+            break
+            
+        # 다음 호출을 위해 종료일 조정 (마지막 날짜 - 1일)
+        last_date_str = chunk[-1]["stck_bsop_date"]
+        current_end = (datetime.strptime(last_date_str, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+        if current_end < start_date:
+            break
+            
+    return all_data
 
 def save_index_to_db(code, data_list):
     if not data_list:
