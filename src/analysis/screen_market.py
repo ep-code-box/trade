@@ -224,7 +224,7 @@ def generate_full_report():
         print(" [!] 현재 진입 가능한 생존 종목이 없습니다. 관망하십시오.")
 
     # TRACK 2: 배당 마법공식 (Yield + ROE + Payout Audit)
-    # [v6.4] 실시간 수익률 계산: (master_info.DPS / daily_analysis.close) * 100
+    # [v6.5 Final Polish] 중복 제거 및 비정상 수익률(15%+) 배당 함정 차단
     query_div = f"""
     SELECT 
         m.code, m.name, d.close, 
@@ -233,9 +233,10 @@ def generate_full_report():
     FROM daily_analysis d
     JOIN master_info m ON d.code = m.code
     WHERE d.date = '{max_date}'
-      AND live_yield BETWEEN 3.0 AND 12.0      -- 실시간 수익률 기준 필터링
-      AND m.roe >= 8.0 OR m.eps > 0             -- 수익성 검증
-      AND m.eps > 0                             -- 흑자 기업 필수
+      AND live_yield BETWEEN 3.0 AND 15.0      -- 실시간 수익률 상한선(15%) 적용 (함정 차단)
+      AND (m.roe >= 8.0 OR m.eps > 0)          -- 수익성 검증
+      AND m.eps > 0                            -- 흑자 기업 필수
+    GROUP BY m.code                            -- 중복 출력 원천 차단
     """
     div_raw = pd.read_sql_query(query_div, conn)
     
