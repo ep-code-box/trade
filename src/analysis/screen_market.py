@@ -223,14 +223,38 @@ def generate_full_report():
     else:
         print(" [!] 현재 진입 가능한 생존 종목이 없습니다. 관망하십시오.")
 
-    # TRACK 2: 고배당
-    query_div = f"SELECT DISTINCT m.code, m.name, d.dividend_yield, m.roe FROM daily_analysis d JOIN master_info m ON d.code = m.code WHERE d.date = '{max_date}' AND d.dividend_yield >= 7.0 AND m.roe >= 10.0 ORDER BY d.dividend_yield DESC LIMIT 5"
-    div_df = pd.read_sql_query(query_div, conn)
-    if not div_df.empty:
-        print(f" [🛡️ TRACK 2: 정석 고배당 (Trailing 12M)]")
-        for _, r in div_df.iterrows():
-            print(f" ▶ {r['name']:<12} | 배당:{r['dividend_yield']:>5.1f}% | ROE:{r['roe']:>5.1f}%")
-        print("-" * 115)
+    # TRACK 2: 배당 마법공식 (Yield + ROE + Payout Audit)
+    # [v6.4] 실시간 수익률 계산: (master_info.DPS / daily_analysis.close) * 100
+    query_div = f"""
+    SELECT 
+        m.code, m.name, d.close, 
+        (CAST(m.per_stock_dvdn_amt AS REAL) / NULLIF(d.close, 0)) * 100 as live_yield,
+        m.roe, m.eps, m.per_stock_dvdn_amt
+    FROM daily_analysis d
+    JOIN master_info m ON d.code = m.code
+    WHERE d.date = '{max_date}'
+      AND live_yield BETWEEN 3.0 AND 12.0      -- 실시간 수익률 기준 필터링
+      AND m.roe >= 8.0 OR m.eps > 0             -- 수익성 검증
+      AND m.eps > 0                             -- 흑자 기업 필수
+    """
+    div_raw = pd.read_sql_query(query_div, conn)
+    
+    if not div_raw.empty:
+        # 1. Payout Ratio(배당성향) 정밀 계산
+        div_raw['payout_ratio'] = (div_raw['per_stock_dvdn_amt'] / div_raw['eps']) * 100
+        
+        # 2. 배당 건전성 필터링 (10% ~ 100%)
+        div_df = div_raw[(div_raw['payout_ratio'] >= 10) & (div_raw['payout_ratio'] <= 100)].copy()
+        
+        if not div_df.empty:
+            # 3. 마법 점수 산정 (실시간 수익률 70% + 수익성 30%)
+            div_df['magic_score'] = div_df['live_yield'] * 0.7 + div_df['roe'].apply(lambda x: max(x, 0)) * 0.3
+            div_df = div_df.sort_values(by='magic_score', ascending=False).head(5)
+            
+            print(f" [🛡️ TRACK 2: 배당 마법공식 Top 5 (Live Yield Quality)]")
+            for _, r in div_df.iterrows():
+                print(f" ▶ {r['name']:<12} | 수익률:{r['live_yield']:>5.1f}% | ROE:{r['roe']:>5.1f}% | 성향:{r['payout_ratio']:>4.0f}%")
+            print("-" * 115)
 
     conn.close()
 

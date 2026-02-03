@@ -80,6 +80,7 @@ def init_db():
             op_prfi INTEGER,                -- 경상이익
             thtr_ntin INTEGER,              -- 당기순이익
             roe REAL,                       -- ROE
+            eps REAL,                       -- EPS (추가)
             base_date TEXT,                 -- 기준년월
             prdy_avls_scal INTEGER,         -- 전일기준 시가총액
             grp_code TEXT,                  -- 그룹사 코드
