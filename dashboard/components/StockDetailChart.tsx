@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceLine, Tooltip, Legend } from 'recharts';
 import { StockData } from '../types';
-import { MOCK_ACCOUNT } from '../mockData';
 
 interface StockDetailChartProps {
   stock: StockData;
@@ -123,17 +122,15 @@ const StockDetailChart: React.FC<StockDetailChartProps> = ({ stock, isInBasket, 
       </div>
 
       <div className="bg-slate-800/40 border border-slate-700 rounded-2xl p-5 mt-auto">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-[9px] text-slate-500 font-bold uppercase mb-1">{isDividendTrack ? 'Est. Annual DPS' : 'Quant Strategy'}</p>
-            <h3 className="text-xl font-mono font-bold text-white">
-              {isDividendTrack ? `₩${((stock.dividendYield || 0) * stock.price / 100).toFixed(0).toLocaleString()}` : `${stock.weight} Weight Apply`}
-            </h3>
+          <div className="flex items-center gap-4">
+             <div className="flex flex-col text-right">
+                <span className="text-[10px] text-slate-500 uppercase font-bold">Action</span>
+                <span className="text-xs text-white">Review & Confirm</span>
+             </div>
+             <button onClick={onToggleBasket} className={`px-6 py-3 rounded-xl text-xs font-bold transition-all border shadow-lg ${isInBasket ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/40 border-transparent'}`}>
+                {isInBasket ? 'REVOKE APPROVAL' : 'CONFIRM TARGET'}
+             </button>
           </div>
-          <button onClick={onToggleBasket} className={`px-6 py-3 rounded-xl text-xs font-bold transition-all border ${isInBasket ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/40'}`}>
-            {isInBasket ? 'BASKET OUT' : 'ADD TO BASKET'}
-          </button>
-        </div>
       </div>
     </div>
   );

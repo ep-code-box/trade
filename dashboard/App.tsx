@@ -9,6 +9,7 @@ import Sidebar from './components/Sidebar';
 import AccountView from './components/AccountView';
 import SettingsView from './components/SettingsView';
 import BasketView from './components/BasketView';
+import Explorer from './components/Explorer';
 
 const App: React.FC = () => {
   const [stocks, setStocks] = useState<StockData[]>([]);
@@ -20,10 +21,28 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [basket, setBasket] = useState<string[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  
+  // Date State
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>('');
 
-  const fetchData = async () => {
+  const fetchDates = async () => {
     try {
-      const sRes = await fetch('/api/stocks');
+      const res = await fetch('/api/dates');
+      const dates = await res.json();
+      setAvailableDates(dates || []);
+      if (dates.length > 0 && !selectedDate) {
+        setSelectedDate(dates[0]); // Default to latest
+      }
+    } catch (e) {
+      console.error("Failed to fetch dates", e);
+    }
+  };
+
+  const fetchData = async (date?: string) => {
+    try {
+      const query = date ? `?date=${date}` : '';
+      const sRes = await fetch(`/api/stocks${query}`);
       if (!sRes.ok) throw new Error(`Stocks API: ${sRes.status}`);
       const sData = await sRes.json();
       setStocks(sData || []);
@@ -51,8 +70,14 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchData();
+    fetchDates();
   }, []);
+
+  useEffect(() => {
+    if (selectedDate) {
+      fetchData(selectedDate);
+    }
+  }, [selectedDate]);
 
   useEffect(() => {
     const savedBasket = localStorage.getItem('th_target_basket');
@@ -76,7 +101,7 @@ const App: React.FC = () => {
           {fetchError && (
             <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-[10px] font-mono flex justify-between items-center animate-pulse">
               <span>⚠️ API CONNECTION ERROR: {fetchError}</span>
-              <button onClick={fetchData} className="px-3 py-1 bg-red-500 text-white rounded-lg font-bold">RETRY</button>
+              <button onClick={() => fetchData(selectedDate)} className="px-3 py-1 bg-red-500 text-white rounded-lg font-bold">RETRY</button>
             </div>
           )}
           
@@ -96,16 +121,32 @@ const App: React.FC = () => {
               </div>
             </div>
             
-            <div className="flex items-center gap-4 lg:gap-6 bg-slate-900/40 p-3 lg:p-4 rounded-2xl border border-slate-800/50 backdrop-blur-md">
-              <div className="text-right">
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">BASKET</p>
-                <p className="text-xs lg:text-sm font-mono text-emerald-400 font-bold">{basket.length} Stocks</p>
-              </div>
-              <div className="h-10 w-[1px] bg-slate-800/50"></div>
-              <div className="text-right">
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">MARKET RS</p>
-                <p className="text-xs lg:text-sm font-bold text-green-400">{summary.marketRS} Alpha</p>
-              </div>
+            <div className="flex items-center gap-4">
+               {/* Date Selector */}
+               <div className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 flex items-center gap-2">
+                 <span className="text-slate-500 text-xs font-bold uppercase">REPORT:</span>
+                 <select 
+                   value={selectedDate} 
+                   onChange={(e) => setSelectedDate(e.target.value)}
+                   className="bg-transparent text-white font-mono text-sm font-bold focus:outline-none"
+                 >
+                   {availableDates.map(date => (
+                     <option key={date} value={date} className="bg-slate-900 text-white">{date}</option>
+                   ))}
+                 </select>
+               </div>
+
+               <div className="hidden lg:flex items-center gap-4 lg:gap-6 bg-slate-900/40 p-3 lg:p-4 rounded-2xl border border-slate-800/50 backdrop-blur-md">
+                 <div className="text-right">
+                   <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">READY</p>
+                   <p className="text-xs lg:text-sm font-mono text-emerald-400 font-bold">{basket.length} Stocks</p>
+                 </div>
+                 <div className="h-10 w-[1px] bg-slate-800/50"></div>
+                 <div className="text-right">
+                   <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">MARKET RS</p>
+                   <p className="text-xs lg:text-sm font-bold text-green-400">{summary.marketRS} Alpha</p>
+                 </div>
+               </div>
             </div>
           </header>
 
@@ -114,9 +155,10 @@ const App: React.FC = () => {
             <Route path="/account" element={<AccountView />} />
             <Route path="/basket" element={<BasketView stocks={stocks.filter(s => basket.includes(s.symbol))} onToggleBasket={toggleBasket} />} />
             <Route path="/settings" element={<SettingsView />} />
-            <Route path="/track1" element={<Screener stocks={stocks.filter(s => s.track?.startsWith('트랙 1'))} trackName={TrackType.TRACK_1} basket={basket} onToggleBasket={toggleBasket} />} />
-            <Route path="/trackex" element={<Screener stocks={stocks.filter(s => s.track?.startsWith('트랙 EX'))} trackName={TrackType.TRACK_EX} basket={basket} onToggleBasket={toggleBasket} />} />
-            <Route path="/track2" element={<Screener stocks={stocks.filter(s => s.track?.startsWith('트랙 2'))} trackName={TrackType.TRACK_2} basket={basket} onToggleBasket={toggleBasket} />} />
+            <Route path="/track1" element={<Screener stocks={stocks.filter(s => s.track && (s.track.includes('1') || s.track.includes('TRACK_1')))} trackName={TrackType.TRACK_1} basket={basket} onToggleBasket={toggleBasket} />} />
+            <Route path="/trackex" element={<Screener stocks={stocks.filter(s => s.track && (s.track.includes('EX') || s.track.includes('Potential')))} trackName={TrackType.TRACK_EX} basket={basket} onToggleBasket={toggleBasket} />} />
+            <Route path="/track2" element={<Screener stocks={stocks.filter(s => s.track && (s.track.includes('2') || s.track.includes('TRACK_2') || s.track.includes('TRACK2')))} trackName={TrackType.TRACK_2} basket={basket} onToggleBasket={toggleBasket} />} />
+            <Route path="/explore" element={<Explorer />} />
           </Routes>
         </main>
       </div>

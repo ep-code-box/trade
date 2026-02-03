@@ -1,14 +1,38 @@
 
-import React, { useState } from 'react';
-import { MOCK_ACCOUNT } from '../mockData';
-import { Position, PositionStatus } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Position, PositionStatus, AccountInfo } from '../types';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie } from 'recharts';
 
 const AccountView: React.FC = () => {
+  const [account, setAccount] = useState<AccountInfo | null>(null);
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const sectorRisk = MOCK_ACCOUNT.positions.reduce((acc, pos) => {
-    const riskAmount = (pos.avgPrice - (pos.trailingStop || pos.initialStopLoss)) * pos.quantity;
+  useEffect(() => {
+    const fetchAccount = async () => {
+      try {
+        const res = await fetch('/api/account');
+        const data = await res.json();
+        setAccount(data);
+      } catch (e) {
+        console.error("Failed to fetch account info", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAccount();
+  }, []);
+
+  if (loading || !account) {
+    return (
+      <div className="h-[400px] flex items-center justify-center text-slate-500 font-mono animate-pulse">
+        Fetching Account & Portfolio Data...
+      </div>
+    );
+  }
+
+  const sectorRisk = account.positions.reduce((acc, pos) => {
+    const riskAmount = (pos.avgPrice - (pos.trailingStop || pos.initialStopLoss || pos.avgPrice * 0.9)) * pos.quantity;
     acc[pos.sector] = (acc[pos.sector] || 0) + Math.max(0, riskAmount);
     return acc;
   }, {} as Record<string, number>);
@@ -16,11 +40,11 @@ const AccountView: React.FC = () => {
   const sectorData = Object.entries(sectorRisk).map(([name, value]) => ({
     name,
     value,
-    percent: (value / MOCK_ACCOUNT.depositSeed) * 100
+    percent: account.depositSeed ? (value / account.depositSeed) * 100 : 0
   }));
 
   const totalHeatAmount = Object.values(sectorRisk).reduce((a, b) => a + b, 0);
-  const totalHeatPercent = (totalHeatAmount / MOCK_ACCOUNT.depositSeed) * 100;
+  const totalHeatPercent = account.depositSeed ? (totalHeatAmount / account.depositSeed) * 100 : 0;
 
   const getStatusColor = (status: PositionStatus) => {
     switch (status) {
@@ -64,16 +88,16 @@ const AccountView: React.FC = () => {
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl overflow-hidden">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-sm font-bold text-slate-400">Sector Risk Concentration</h3>
-            <span className="text-[10px] text-red-500 font-bold uppercase tracking-tighter">Limit: {MOCK_ACCOUNT.maxSectorExposure}%</span>
+            <span className="text-[10px] text-red-500 font-bold uppercase tracking-tighter">Limit: {account.maxSectorExposure || 20}%</span>
           </div>
           <div className="h-16 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart layout="vertical" data={sectorData}>
-                <XAxis type="number" hide domain={[0, MOCK_ACCOUNT.maxSectorExposure * 1.5]} />
+                <XAxis type="number" hide domain={[0, (account.maxSectorExposure || 20) * 1.5]} />
                 <YAxis dataKey="name" type="category" stroke="#475569" fontSize={10} width={70} axisLine={false} tickLine={false} />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                   {sectorData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.percent > MOCK_ACCOUNT.maxSectorExposure ? '#ef4444' : '#3b82f6'} />
+                    <Cell key={`cell-${index}`} fill={entry.percent > (account.maxSectorExposure || 20) ? '#ef4444' : '#3b82f6'} />
                   ))}
                 </Bar>
               </BarChart>
@@ -110,7 +134,13 @@ const AccountView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {MOCK_ACCOUNT.positions.map(pos => (
+              {account.positions.length === 0 ? (
+                <tr>
+                   <td colSpan={5} className="px-8 py-10 text-center text-slate-500 text-sm">
+                      보유 중인 포지션이 없습니다. (No Active Positions)
+                   </td>
+                </tr>
+              ) : account.positions.map(pos => (
                 <tr 
                   key={pos.symbol} 
                   className={`hover:bg-blue-600/5 transition-colors cursor-pointer ${selectedPosition?.symbol === pos.symbol ? 'bg-blue-600/10' : ''}`}
@@ -122,7 +152,7 @@ const AccountView: React.FC = () => {
                       <div className="w-20 h-1 bg-slate-800 rounded-full overflow-hidden">
                         <div 
                           className={`h-full transition-all ${pos.vitalityScore > 80 ? 'bg-emerald-500' : pos.vitalityScore > 50 ? 'bg-orange-500' : 'bg-red-500'}`} 
-                          style={{ width: `${pos.vitalityScore}%` }}
+                          style={{ width: `${pos.vitalityScore || 50}%` }}
                         ></div>
                       </div>
                     </div>
@@ -133,24 +163,26 @@ const AccountView: React.FC = () => {
                         {pos.status}
                       </span>
                       <span className={`text-[10px] font-bold ${pos.rsTrend === 'rising' ? 'text-emerald-500' : 'text-red-500'}`}>
-                        RS {pos.rsTrend.toUpperCase()}
+                        RS {pos.rsTrend ? pos.rsTrend.toUpperCase() : 'FLAT'}
                       </span>
                     </div>
                   </td>
                   <td className="px-6 py-5 font-mono text-xs text-slate-300">
-                    ₩{pos.trailingStop.toLocaleString()}
+                    ₩{(pos.trailingStop || pos.initialStopLoss || 0).toLocaleString()}
                   </td>
                   <td className="px-6 py-5">
                     <div className="flex flex-col">
                       <span className={`text-sm font-mono font-bold ${pos.profitRate >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {pos.profitRate >= 0 ? '+' : ''}{pos.profitRate}%
                       </span>
-                      <span className="text-[10px] text-slate-500">R:R 1:{((pos.targetPrice - pos.avgPrice) / (pos.avgPrice - pos.initialStopLoss)).toFixed(1)}</span>
+                      <span className="text-[10px] text-slate-500">
+                        {pos.targetPrice && pos.initialStopLoss ? `R:R 1:${((pos.targetPrice - pos.avgPrice) / (pos.avgPrice - pos.initialStopLoss)).toFixed(1)}` : 'R:R N/A'}
+                      </span>
                     </div>
                   </td>
                   <td className="px-8 py-5 text-right">
                     <div className="flex flex-col items-end">
-                      <span className="text-xs font-mono text-white">{pos.daysHeld}d</span>
+                      <span className="text-xs font-mono text-white">{pos.daysHeld || 0}d</span>
                       {pos.daysHeld > 30 && pos.profitRate < 5 && (
                         <span className="text-[9px] text-purple-400 font-bold">DEAD MONEY ⏳</span>
                       )}

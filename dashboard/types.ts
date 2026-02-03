@@ -61,6 +61,7 @@ export interface TrendTemplateStatus {
 }
 
 export interface StockData {
+  date?: string;
   symbol: string;
   name: string;
   price: number;

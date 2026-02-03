@@ -33,6 +33,7 @@ COMMANDS = {
     "check": "샘플 검증 → python -m src.scripts.check_sample_calculation",
     "debug": "API 디버그 → python -m src.scripts.debug_api",
     "test-div": "배당 샘플 테스트 → python -m src.scripts.test_dividend_sample",
+    "account": "계좌 잔고 조회 → python -m src.account",
 }
 
 
@@ -72,6 +73,7 @@ def main():
         "check": ("src.scripts.check_sample_calculation", "verify_sample"),
         "debug": ("src.scripts.debug_api", "debug_check"),
         "test-div": ("src.scripts.test_dividend_sample", "run_sample_test"),
+        "account": ("src.account", "print_account_info"),
     }
     mod_name, fn_name = runners[cmd]
     import importlib

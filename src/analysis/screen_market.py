@@ -186,21 +186,95 @@ def generate_full_report():
         print(f" 🚀 시장 주도 섹터: {theme_str}")
         print("-" * 115)
 
+def save_to_db(conn, candidates, track_name, date):
+    """스크리닝 결과를 trade_plan 테이블에 저장"""
+    if not candidates: return
+    
+    data = []
+    for c in candidates:
+        # Track 2의 경우 필드명이 다를 수 있음
+        if track_name == 'TRACK2':
+            entry = 0
+            stop = 0
+            weight = "10%"
+            rs = c.get('roe', 0) # Track 2는 RS 대신 ROE나 수익률을 중요 지표로 사용
+            vcp = 0
+            rationale = f"Live Yield {c['live_yield']:.1f}% / Payout {c['payout_ratio']:.0f}%"
+        else:
+            entry, stop, weight, _ = calculate_survival_trade(c)
+            rs = c['rs_score']
+            vcp = c.get('vcp_ratio', 0)
+            rationale = c.get('quality', '')
+
+        data.append((
+            date, c['code'], c['name'], 
+            int(entry), int(stop), weight, 
+            'READY', track_name, 
+            float(rs), float(vcp), rationale
+        ))
+    
+    conn.executemany("""
+        INSERT INTO trade_plan (date, code, name, entry_price, stop_price, weight, status, track, rs_score, vcp_ratio, rationale)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, data)
+
+def generate_full_report():
+    conn = get_connection()
+    max_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
+    
+    # [v5.6] 기존 리포트 초기화 (중복 방지)
+    conn.execute("DELETE FROM trade_plan WHERE date = ?", (max_date,))
+    
+    print("=" * 115)
+    print(f" [TrendHunter v5.5 Survival Master] 거장의 생존 원칙 및 RS 주도주 리포트 | {max_date}")
+    print("=" * 115)
+    
+    # ... (시장 온도계 등 기존 출력 로직 유지) ...
+    kospi = conn.execute(f"SELECT close, sma_50, sma_200 FROM daily_analysis WHERE code='0001' AND date='{max_date}'").fetchone()
+    kosdaq = conn.execute(f"SELECT close, sma_50, sma_200 FROM daily_analysis WHERE code='1001' AND date='{max_date}'").fetchone()
+    
+    if kospi and kosdaq:
+        p_status = "UP" if kospi[0] > kospi[1] else "DOWN"
+        q_status = "UP" if kosdaq[0] > kosdaq[1] else "DOWN"
+        print(f" 🌡️ 시장 상태: KOSPI {p_status} ({kospi[0]:,.0f}) | KOSDAQ {q_status} ({kosdaq[0]:,.0f})")
+    
+    total_cnt = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{max_date}' AND rs_score IS NOT NULL").fetchone()[0]
+    stage2_cnt = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{max_date}' AND close > sma_50 AND sma_50 > sma_150 AND sma_150 > sma_200").fetchone()[0]
+    stage2_pct = (stage2_cnt / total_cnt * 100) if total_cnt > 0 else 0
+    print(f" 🔥 시장 열기: Stage 2 비율 {stage2_pct:.1f}%")
+    print("-" * 115)
+
+    # 2. 시장 주도 섹터 사전 분석
+    raw_df = get_trend_candidates_db()
+    if not raw_df.empty:
+        all_raw_themes = []
+        for code in raw_df['code'].head(50):
+            themes = get_themes_for_stock(code)
+            all_raw_themes.extend(themes)
+        common_themes = Counter(all_raw_themes).most_common(5)
+        theme_str = " | ".join([f"#{t}({c})" for t, c in common_themes])
+        print(f" 🚀 시장 주도 섹터: {theme_str}")
+        print("-" * 115)
+
     # 3. 정밀 필터링 (Survival & Dynamic VCP)
     strict_candidates = []
     relaxed_candidates = []
+    failed_logs = []  # 탈락 사유 수집
     
     if not raw_df.empty:
         for _, row in raw_df.iterrows():
-            # [생존자 필터] 손절선 이탈 종목 즉시 탈락
             entry, stop, weight, is_broken = calculate_survival_trade(row)
-            if is_broken: continue
+            if is_broken: 
+                failed_logs.append({'name': row['name'], 'rs': row['rs_score'], 'reason': f"🛡️ 손절선 이탈 ({int(row['close']):,} < {int(stop):,})"})
+                continue
             
-            vcp_score = check_chart_pattern_score(row['code']) # 가격 수축도
+            vcp_score = check_chart_pattern_score(row['code'])
             row['vcp_score'] = vcp_score
             row['quality'] = get_supply_quality(row['code'])
             
-            if "이탈" in row['quality']: continue
+            if "이탈" in row['quality']: 
+                failed_logs.append({'name': row['name'], 'rs': row['rs_score'], 'reason': f"🚨 수급 이탈 ({row['quality']})"})
+                continue
             
             row['themes'] = get_themes_for_stock(row['code'])
             
@@ -208,23 +282,34 @@ def generate_full_report():
                 strict_candidates.append(row)
             elif vcp_score <= 0.06:
                 relaxed_candidates.append(row)
+            else:
+                failed_logs.append({'name': row['name'], 'rs': row['rs_score'], 'reason': f"📈 변동성 초과 (VCP {vcp_score:.1%} > 6%)"})
 
-    # 4. 결과 출력 (RS 내림차순 정렬)
+    # 4. 결과 출력 및 DB 저장
     if strict_candidates:
         print(" [🎯 TRACK 1: 거장의 정조준 (Strict 4%)] - 가장 강한 놈부터 정렬")
+        save_to_db(conn, strict_candidates, 'TRACK1_STRICT', max_date) # DB 저장
         for s in sorted(strict_candidates, key=lambda x: x['rs_score'], reverse=True):
             print_stock_row(s)
         print("-" * 115)
     elif relaxed_candidates:
         print(" [⚠️ TRACK 1: 현실적 차선책 (Relaxed 6%)] - 상위 RS 3선")
-        for s in sorted(relaxed_candidates, key=lambda x: x['rs_score'], reverse=True)[:3]:
+        # Relaxed는 상위 3개만 저장
+        top3_relaxed = sorted(relaxed_candidates, key=lambda x: x['rs_score'], reverse=True)[:3]
+        save_to_db(conn, top3_relaxed, 'TRACK1_RELAXED', max_date) # DB 저장
+        for s in top3_relaxed:
             print_stock_row(s)
         print("-" * 115)
     else:
         print(" [!] 현재 진입 가능한 생존 종목이 없습니다. 관망하십시오.")
+        if failed_logs:
+            print("\n [🔍 관망 브리핑: 주요 후보 탈락 사유 (RS Top 5)]")
+            failed_logs.sort(key=lambda x: x['rs'], reverse=True)
+            for f in failed_logs[:5]:
+                 print(f"  - {f['name']:<12} | RS {f['rs']:>3.0f} | {f['reason']}")
+            print("-" * 115)
 
-    # TRACK 2: 배당 마법공식 (Yield + ROE + Payout Audit)
-    # [v6.5 Final Polish] 중복 제거 및 비정상 수익률(15%+) 배당 함정 차단
+    # TRACK 2: 배당 마법공식
     query_div = f"""
     SELECT 
         m.code, m.name, d.close, 
@@ -233,30 +318,30 @@ def generate_full_report():
     FROM daily_analysis d
     JOIN master_info m ON d.code = m.code
     WHERE d.date = '{max_date}'
-      AND live_yield BETWEEN 3.0 AND 15.0      -- 실시간 수익률 상한선(15%) 적용 (함정 차단)
-      AND (m.roe >= 8.0 OR m.eps > 0)          -- 수익성 검증
-      AND m.eps > 0                            -- 흑자 기업 필수
-    GROUP BY m.code                            -- 중복 출력 원천 차단
+      AND live_yield BETWEEN 3.0 AND 15.0
+      AND (m.roe >= 8.0 OR m.eps > 0)
+      AND m.eps > 0
+    GROUP BY m.code
     """
     div_raw = pd.read_sql_query(query_div, conn)
     
     if not div_raw.empty:
-        # 1. Payout Ratio(배당성향) 정밀 계산
         div_raw['payout_ratio'] = (div_raw['per_stock_dvdn_amt'] / div_raw['eps']) * 100
-        
-        # 2. 배당 건전성 필터링 (10% ~ 100%)
         div_df = div_raw[(div_raw['payout_ratio'] >= 10) & (div_raw['payout_ratio'] <= 100)].copy()
         
         if not div_df.empty:
-            # 3. 마법 점수 산정 (실시간 수익률 70% + 수익성 30%)
             div_df['magic_score'] = div_df['live_yield'] * 0.7 + div_df['roe'].apply(lambda x: max(x, 0)) * 0.3
             div_df = div_df.sort_values(by='magic_score', ascending=False).head(5)
+            
+            # DB 저장 (DataFrame -> List of Dict 변환 필요)
+            save_to_db(conn, div_df.to_dict('records'), 'TRACK2', max_date)
             
             print(f" [🛡️ TRACK 2: 배당 마법공식 Top 5 (Live Yield Quality)]")
             for _, r in div_df.iterrows():
                 print(f" ▶ {r['name']:<12} | 수익률:{r['live_yield']:>5.1f}% | ROE:{r['roe']:>5.1f}% | 성향:{r['payout_ratio']:>4.0f}%")
             print("-" * 115)
 
+    conn.commit()
     conn.close()
 
 if __name__ == "__main__":

@@ -10,12 +10,13 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, basketCount = 0 }) => {
   const links = [
-    { to: '/', label: '시장 개요', icon: '📊' },
-    { to: '/account', label: '내 계좌 & 트레이딩', icon: '💎' },
-    { to: '/basket', label: '장바구니 (Target)', icon: '🛒', badge: basketCount },
-    { to: '/track1', label: '트랙 1: 주도주', icon: '🚀' },
-    { to: '/trackex', label: '트랙 EX: 모멘텀', icon: '⚡' },
-    { to: '/track2', label: '트랙 2: 배당주', icon: '💰' },
+    { to: '/', label: '시장 요약 (Dashboard)', icon: '📊' },
+    { to: '/explore', label: '시장 탐색 (Explorer)', icon: '🔭' },
+    { to: '/track1', label: '트랙 1 (Growth)', icon: '🚀' },
+    { to: '/track2', label: '트랙 2 (Value)', icon: '💎' },
+    { to: '/trackex', label: '트랙 EX (Potential)', icon: '✨' },
+    { to: '/basket', label: '매매 대기 (Ready)', icon: '✅', badge: basketCount },
+    { to: '/account', label: '계좌 및 주문 (Orders)', icon: '💳' },
   ];
 
   return (

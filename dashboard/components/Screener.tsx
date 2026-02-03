@@ -26,13 +26,19 @@ const TemplateDot: React.FC<{ active: boolean; index: number }> = ({ active, ind
 const Screener: React.FC<ScreenerProps> = ({ stocks, trackName, basket, onToggleBasket }) => {
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
   const isDividendTrack = trackName.includes('뚜벅이') || trackName.includes('TRACK 2');
+  const reportDate = stocks.length > 0 ? stocks[0].date : '';
 
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-white flex items-center gap-3">
             {trackName}
+            {reportDate && (
+              <span className="text-sm font-mono font-normal text-slate-500 bg-slate-800 px-2 py-1 rounded-lg">
+                DATE: {reportDate}
+              </span>
+            )}
           </h2>
           <p className="text-slate-400 text-sm mt-1 font-medium">
             {isDividendTrack ? '안정적인 현금흐름을 창출하는 고배당 우량주' : '손익비가 검증된 상위 리더 목록'}
@@ -76,9 +82,14 @@ const Screener: React.FC<ScreenerProps> = ({ stocks, trackName, basket, onToggle
                             e.stopPropagation();
                             onToggleBasket(stock.symbol);
                           }}
-                          className={`text-xl transition-all hover:scale-125 ${basket.includes(stock.symbol) ? 'grayscale-0 opacity-100' : 'grayscale opacity-30 hover:opacity-100'}`}
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                            basket.includes(stock.symbol) 
+                              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40 scale-110' 
+                              : 'bg-slate-800 text-slate-500 hover:bg-slate-700 hover:text-white'
+                          }`}
+                          title={basket.includes(stock.symbol) ? "확정 취소" : "매매 확정"}
                         >
-                          🛒
+                          {basket.includes(stock.symbol) ? '✓' : '+'}
                         </button>
                       </td>
                       <td className="px-6 py-5">
