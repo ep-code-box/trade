@@ -140,19 +140,24 @@ def calculate_survival_trade(row):
 
 def print_stock_row(row):
     e, s, w, brk = calculate_survival_trade(row)
-    mark = "🚨" if brk else "⏳" if row['vcp_ratio'] > 0.15 else "🎯"
+    # 생존자 필터에 의해 brk인 종목은 여기까지 오지 않음
+    p_vcp = row.get('vcp_score', 0)
+    v_vcp = row.get('vcp_ratio', 0)
+    mark = "⏳" if p_vcp > 0.04 else "🎯"
+    
     quality = row.get('quality', 'Unknown')
-    # 쌍끌이인 경우 이름 강조
     name_display = f"*{row['name']}" if "💎" in quality else row['name']
-    print(f" {mark} {name_display:<12} | RS {row['rs_score']:2.0f} | {quality} | VCP {row['vcp_ratio']:.2f} | 🎯:{e:>8,} | 🛡️:{s:>8,}")
+    
+    # P-VCP(가격 긴밀함)와 R-VCP(변동성 비율) 병행 표기
+    print(f" {mark} {name_display:<12} | RS {row['rs_score']:2.0f} | {quality} | P-VCP {p_vcp:.2f} | R-VCP {v_vcp:.2f} | 🎯:{e:>8,} | 🛡️:{s:>8,}")
 
 def generate_full_report():
     conn = get_connection()
     max_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
     
-    print("=" * 105)
-    print(f" [TrendHunter v5.4 Dynamic Master] 정조준 및 유연한 VCP 리포트 | {max_date}")
-    print("=" * 105)
+    print("=" * 115)
+    print(f" [TrendHunter v5.5 Survival Master] 거장의 생존 원칙 및 RS 주도주 리포트 | {max_date}")
+    print("=" * 115)
     
     # 1. 시장 온도계
     kospi = conn.execute(f"SELECT close, sma_50, sma_200 FROM daily_analysis WHERE code='0001' AND date='{max_date}'").fetchone()
@@ -167,7 +172,7 @@ def generate_full_report():
     stage2_cnt = conn.execute(f"SELECT COUNT(*) FROM daily_analysis WHERE date='{max_date}' AND close > sma_50 AND sma_50 > sma_150 AND sma_150 > sma_200").fetchone()[0]
     stage2_pct = (stage2_cnt / total_cnt * 100) if total_cnt > 0 else 0
     print(f" 🔥 시장 열기: Stage 2 비율 {stage2_pct:.1f}%")
-    print("-" * 105)
+    print("-" * 115)
 
     # 2. 시장 주도 섹터 사전 분석
     raw_df = get_trend_candidates_db()
@@ -179,43 +184,44 @@ def generate_full_report():
         common_themes = Counter(all_raw_themes).most_common(5)
         theme_str = " | ".join([f"#{t}({c})" for t, c in common_themes])
         print(f" 🚀 시장 주도 섹터: {theme_str}")
-        print("-" * 105)
+        print("-" * 115)
 
-    # 3. 정밀 필터링 (Dynamic VCP)
+    # 3. 정밀 필터링 (Survival & Dynamic VCP)
     strict_candidates = []
     relaxed_candidates = []
     
     if not raw_df.empty:
         for _, row in raw_df.iterrows():
-            vcp_score = check_chart_pattern_score(row['code'])
+            # [생존자 필터] 손절선 이탈 종목 즉시 탈락
+            entry, stop, weight, is_broken = calculate_survival_trade(row)
+            if is_broken: continue
+            
+            vcp_score = check_chart_pattern_score(row['code']) # 가격 수축도
+            row['vcp_score'] = vcp_score
+            row['quality'] = get_supply_quality(row['code'])
+            
+            if "이탈" in row['quality']: continue
+            
+            row['themes'] = get_themes_for_stock(row['code'])
+            
             if vcp_score <= 0.04:
-                row['vcp_score'] = vcp_score
-                row['quality'] = get_supply_quality(row['code'])
-                if "이탈" not in row['quality']:
-                    row['themes'] = get_themes_for_stock(row['code'])
-                    strict_candidates.append(row)
+                strict_candidates.append(row)
             elif vcp_score <= 0.06:
-                row['vcp_score'] = vcp_score
-                row['quality'] = get_supply_quality(row['code'])
-                if "이탈" not in row['quality']:
-                    row['themes'] = get_themes_for_stock(row['code'])
-                    relaxed_candidates.append(row)
+                relaxed_candidates.append(row)
 
-    final_display = []
+    # 4. 결과 출력 (RS 내림차순 정렬)
     if strict_candidates:
-        print(" [🎯 TRACK 1: 거장의 정조준 (Strict 4%)]")
-        final_display = strict_candidates
-    elif relaxed_candidates:
-        print(" [⚠️ TRACK 1: 현실적 차선책 (Relaxed 6%)]")
-        # 차선책은 너무 많으면 노이즈가 되므로 가장 RS 높은/수축된 3개만 추천
-        final_display = sorted(relaxed_candidates, key=lambda x: (x['vcp_score'], -x['rs_score']))[:3]
-    else:
-        print(" [!] 정조준 타점에 들어온 종목이 없습니다. 관망하십시오.")
-
-    if final_display:
-        for s in final_display:
+        print(" [🎯 TRACK 1: 거장의 정조준 (Strict 4%)] - 가장 강한 놈부터 정렬")
+        for s in sorted(strict_candidates, key=lambda x: x['rs_score'], reverse=True):
             print_stock_row(s)
-        print("-" * 105)
+        print("-" * 115)
+    elif relaxed_candidates:
+        print(" [⚠️ TRACK 1: 현실적 차선책 (Relaxed 6%)] - 상위 RS 3선")
+        for s in sorted(relaxed_candidates, key=lambda x: x['rs_score'], reverse=True)[:3]:
+            print_stock_row(s)
+        print("-" * 115)
+    else:
+        print(" [!] 현재 진입 가능한 생존 종목이 없습니다. 관망하십시오.")
 
     # TRACK 2: 고배당
     query_div = f"SELECT DISTINCT m.code, m.name, d.dividend_yield, m.roe FROM daily_analysis d JOIN master_info m ON d.code = m.code WHERE d.date = '{max_date}' AND d.dividend_yield >= 7.0 AND m.roe >= 10.0 ORDER BY d.dividend_yield DESC LIMIT 5"
@@ -224,7 +230,7 @@ def generate_full_report():
         print(f" [🛡️ TRACK 2: 정석 고배당 (Trailing 12M)]")
         for _, r in div_df.iterrows():
             print(f" ▶ {r['name']:<12} | 배당:{r['dividend_yield']:>5.1f}% | ROE:{r['roe']:>5.1f}%")
-        print("-" * 105)
+        print("-" * 115)
 
     conn.close()
 
