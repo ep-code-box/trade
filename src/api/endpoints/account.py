@@ -73,30 +73,86 @@ async def get_account_summary():
         if invested > 0:
             total_profit_rate = round((total_profit / invested) * 100, 2)
 
+        # [v5.9] DB에서 종목 정보(섹터, RS 등) 가져오기
+        import sqlite3
+        DB_PATH = "TrendHunter/db/stock_info.db"
+        
         positions = []
-        for item in output1:
-            qty = int(item.get('hldg_qty', 0) or 0)
-            if qty > 0:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            
+            for item in output1:
+                symbol = item.get('pdno')
+                qty = int(item.get('hldg_qty', 0) or 0)
+                if qty <= 0: continue
+
+                # [v5.9] 올바른 테이블명과 컬럼명으로 정보 조회
+                sector = "기타"
+                rs_score = 50
+                try:
+                    cur.execute("""
+                        SELECT s.category_name 
+                        FROM sectors_themes s 
+                        WHERE s.code = ? AND s.category_type = 'sector' 
+                        LIMIT 1
+                    """, (symbol,))
+                    row = cur.fetchone()
+                    if row: sector = row['category_name']
+
+                    cur.execute("""
+                        SELECT rs_score FROM daily_analysis 
+                        WHERE code = ? 
+                        ORDER BY date DESC LIMIT 1
+                    """, (symbol,))
+                    row = cur.fetchone()
+                    if row: rs_score = row['rs_score']
+                except:
+                    pass # DB 조회 실패해도 계속 진행
+                
                 avg_price = float(item.get('pchs_avg_pric', 0) or 0)
+                curr_price = int(item.get('prpr', 0) or 0)
+                profit_rate = float(item.get('evlu_pfls_rt', 0) or 0)
+                
+                # RS 트렌드 결정 (점수 기준)
+                rs_trend = 'rising' if rs_score >= 80 else 'flat'
+                vitality = int(rs_score)
+                curr_eval_amount = curr_price * qty
+
                 positions.append({
-                    "symbol": item.get('pdno'),
+                    "symbol": symbol,
                     "name": item.get('prdt_name'),
                     "quantity": qty,
-                    "currentPrice": int(item.get('prpr', 0) or 0),
+                    "currentPrice": curr_price,
                     "avgPrice": avg_price,
-                    "profitRate": float(item.get('evlu_pfls_rt', 0) or 0),
+                    "profitRate": profit_rate,
                     "profit": int(item.get('evlu_pfls_amt', 0) or 0),
-                    "status": "HEALTHY", "sector": "Unknown",
-                    "initialStopLoss": int(avg_price * 0.9), "trailingStop": int(avg_price * 0.95),
-                    "breakEvenPrice": int(avg_price), "targetPrice": int(avg_price * 1.2),
-                    "daysHeld": 1, "rsTrend": "flat", "vitalityScore": 50,
+                    "evalAmount": curr_eval_amount, # 비중 계산용 추가
+                    "status": "HEALTHY" if profit_rate > -3 else "CAUTION",
+                    "sector": sector,
+                    "initialStopLoss": int(avg_price * 0.95),
+                    "trailingStop": int(curr_price * 0.92),
+                    "breakEvenPrice": int(avg_price),
+                    "targetPrice": int(avg_price * 1.2),
+                    "daysHeld": 1, 
+                    "rsTrend": rs_trend,
+                    "vitalityScore": vitality,
                     "entryDate": datetime.now().strftime('%Y-%m-%d')
                 })
+            conn.close()
+        except Exception as db_e:
+            print(f"DB Enrichment Error: {db_e}")
 
         return {
-            "totalAsset": total_asset, "cash": cash, "totalProfit": total_profit,
-            "totalProfitRate": total_profit_rate, "buyingPower": cash,
-            "riskPerTradePercent": 1.0, "positions": positions
+            "totalAsset": total_asset,
+            "cash": cash,
+            "totalProfit": total_profit,
+            "totalProfitRate": total_profit_rate,
+            "buyingPower": cash,
+            "riskPerTradePercent": 1.0,
+            "maxRiskAmount": int(total_asset * 0.01),
+            "positions": positions
         }
     except Exception as e:
         return {"totalAsset": 0, "cash": 0, "positions": [], "error": str(e)}

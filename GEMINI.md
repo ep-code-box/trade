@@ -47,4 +47,51 @@ The system consists of a robust **Python Backend Analysis Engine** and a modern 
 6.  **Screener Execution**: 실시간 수익률 연산 및 생존자 필터링 기반 리포트 생성.
 
 ---
-**최종 지침**: "이 문서는 TrendHunter의 헌법이다. 코드는 이 원칙을 구현하는 도구일 뿐이며, 원칙을 벗어난 코드는 즉시 폐기한다."
+
+## 5. Design Constitution (Studio Minimalism)
+
+### A. Visual Standardization
+- **Consistent Typography**: All data labels MUST use `text-[11px]`, **Bold**, and **Uppercase**. Primary metrics are standardized to `text-xl` or `text-2xl`. All numerical values MUST use a **Monospace font** to ensure perfect character alignment across columns.
+- **Restrained Color Palette**: Use `slate-950/900` for backgrounds and `slate-800` for borders. Color-code using `emerald` for Profit, `red` for Loss, and `orange` for Risk. Maintain ~80% saturation/opacity to prevent visual fatigue. Ban all excessive gradients, glows, or decorative animations.
+
+### B. Information Hierarchy (Risk-First)
+- **Primary Directives**: **Available Cash** and **Risk Limit (1% Rule)** must be the most prominent elements in any account-related view. The UI must answer "How much can I lose?" before "How much can I make?".
+- **Dynamic Seed Definition**: The system operates on the principle: "The current balance IS the seed." Historical principal is irrelevant; the **Current Total Equity** is the absolute baseline for all real-time risk and position sizing calculations.
+
+### C. Layout & Uniformity
+- **Modular Grid**: All summary elements must have identical height, padding, and alignment. Use standardized components (e.g., `SummaryCard`) to enforce strict UI consistency.
+- **Responsive Grouping**: Information must be grouped logically (e.g., Cash paired with Risk Guide) and must maintain this relationship across mobile (2-column grid) and desktop (horizontal flex) layouts.
+
+---
+
+## 6. Development Constitution (Efficiency & Cleanliness)
+
+### A. Modular Architecture
+- **Strict Line Limit**: No single source file shall exceed **200-300 lines**. If logic expands beyond this threshold, it MUST be refactored into smaller, specialized modules.
+- **Single Responsibility**: Each file must serve one clear purpose, adhering to the "Atomic Logic" principle.
+
+### B. Logical Isolation
+- **Centralized Validation**: All diagnostic checks, integrity audits, and debugging scripts MUST be concentrated in a dedicated directory (e.g., `src/scripts/`).
+- **Separation of Concerns**: Core engine logic and auxiliary check logic must never reside in the same file.
+
+### C. Resource & State Management
+- **Mandatory Cleanup**: All temporary artifacts, intermediate data files, or transient logs generated during execution MUST be deleted immediately upon process completion.
+- **Stateless Operation**: The system should maintain a zero-footprint policy regarding temporary files.
+
+---
+
+## 7. Operational Protocol (Standard Methodology)
+
+### A. Source of Truth Compliance
+- **Reference First**: Every API implementation or troubleshooting session MUST begin with cross-referencing the **official KIS API documentation**, the **KIS GitHub repository**, and the **REST API portal**. No assumptions are allowed regarding header or body structures.
+
+### B. Sample-First Validation (Incremental Execution)
+- **Dry Run**: Before executing bulk data acquisition or batch updates, the agent MUST perform a test run with a small subset (1-5 samples).
+- **Schema Audit**: Verify the raw API response against the expected schema during the sample phase to ensure compatibility before scale-up.
+
+### C. Post-Integration Database Audit
+- **Verification Loop**: Once full data processing is complete, the results MUST be verified by performing direct SQL queries against the local database (`stock_info.db`).
+- **Integrity Check**: Confirm that fields are correctly populated, data types are preserved, and no corruption occurred during the batch process.
+
+---
+**최종 지침 (Final Directive)**: "This document is the Constitution of TrendHunter. Code is merely a tool to implement these principles. Any code that deviates from these rules shall be discarded immediately."

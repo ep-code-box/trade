@@ -1,7 +1,7 @@
 """
-[v14.0] 거장의 회귀: 정석 필드 매핑 엔진
+[v14.2] 거장의 회귀: 정석 필드 매핑 엔진 (Final)
 기능: 비동기 Triple Chain (재무비율 + 주요비율 + 손익계산서)
-특징: API 정석 필드(roe_val, eps) 매핑으로 ROE 0.0 이슈 완전 해결
+특징: API 정석 필드(roe_val, eps, payout_rate) 매핑 및 실시간 DPS 역산
 """
 import asyncio
 import time
@@ -47,25 +47,27 @@ def batch_update_db_final(conn, results):
         r_rat = get_best_stat(res["ratio_list"])
         i_inc = get_best_stat(res["income_list"])
         
-        # [v14.0] 명세서 정석 필드 매핑: roe_val, eps
+        # [v14.2] 명세서 정석 필드 매핑: roe_val, eps, payout_rate
         eps = float(f_inc.get("eps") or 0) if f_inc else 0
-        roe = float(f_inc.get("roe_val") or 0) if f_inc else 0 # roe -> roe_val로 수정
+        roe = float(f_inc.get("roe_val") or 0) if f_inc else 0
         payout = float(r_rat.get("payout_rate") or 0) if r_rat else 0
         net_income = float(i_inc.get("thtr_ntin") or 0) if i_inc else 0
         
+        # [실시간 DPS 역산] "기록된 DPS" 생성 로직
         calculated_dps = 0
         if eps > 0 and payout > 0:
+            # payout_rate 지능형 판단 (0.3 -> 30%, 30.0 -> 30%)
             p_ratio = payout if payout < 1.0 else payout / 100.0
             calculated_dps = int(eps * p_ratio)
             
-            # 15% 세이프티 캡
+            # 15% 세이프티 캡 (배당 함정 1차 방어)
             try:
                 p_row = conn.execute("SELECT close FROM daily_analysis WHERE code=? ORDER BY date DESC LIMIT 1", (code,)).fetchone()
                 if p_row and p_row[0] > 0 and (calculated_dps / p_row[0]) > 0.15: 
                     calculated_dps = 0
             except: pass
 
-        # master_info 업데이트
+        # master_info 업데이트 (DPS 원본 보존)
         cur.execute("""
             UPDATE master_info 
             SET roe = ?, 
@@ -76,6 +78,7 @@ def batch_update_db_final(conn, results):
             WHERE code = ?
         """, (roe, eps, net_income, calculated_dps, calculated_dps, today, code))
         
+        # daily_analysis 배당수익률은 스크리너가 실시간 계산하므로 여기서는 캐시 성격으로 업데이트
         if calculated_dps > 0:
             cur.execute("""
                 UPDATE daily_analysis 
@@ -88,12 +91,8 @@ def batch_update_db_final(conn, results):
 async def main_async():
     if not get_access_token(): return
     conn = get_connection()
-    # [v14.1] 증분 업데이트 전략: 최근 7일 이내 업데이트된 종목은 Skip
-    query = """
-        SELECT code FROM master_info 
-        WHERE LENGTH(code) = 6 
-          AND (updated_at IS NULL OR updated_at < date('now', '-7 days'))
-    """
+    # [FORCE UPDATE] 전 종목 정석 데이터 재산출
+    query = "SELECT code FROM master_info WHERE LENGTH(code) = 6"
     stocks = pd.read_sql_query(query, conn)["code"].tolist()
     conn.close()
 
@@ -102,7 +101,7 @@ async def main_async():
         print("✅ 모든 종목의 재무 데이터가 최신 상태입니다. (최근 7일 이내)")
         return
 
-    print(f"🚀 [v14.1] 증분 수집 가동: {total}개 종목 (Skip 최근 7일)")
+    print(f"🚀 [v14.2] 펀더멘털 정석 업데이트 가동: {total}개 종목")
     start_time = time.time()
     
     sem = asyncio.Semaphore(30)

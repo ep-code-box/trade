@@ -11,7 +11,7 @@ BACKEND_PID=$!
 
 # 2. Frontend 실행
 echo "🚀 Starting TrendHunter Dashboard (React)..."
-cd dashboard
+cd trade-front
 
 # node_modules가 없으면 설치
 if [ ! -d "node_modules" ]; then

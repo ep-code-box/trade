@@ -10,8 +10,8 @@ def fetch_dividend_rank(market_gb, dividend_gb):
     path = "/uapi/domestic-stock/v1/ranking/dividend-rate"
     from datetime import datetime
     now = datetime.now().strftime("%Y%m%d")
-    # [최신 1년+ 타겟팅] 2024년 1월 1일부터 오늘까지 (확정 배당금 포함)
-    f_dt = "20240101"
+    # [최신 2년 타겟팅] 2023년부터 오늘까지의 모든 배당 기록 수집
+    f_dt = "20230101"
     
     params = {
         "CTS_AREA": "", "GB1": market_gb, "UPJONG": "0001",
