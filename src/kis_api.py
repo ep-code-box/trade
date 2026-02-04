@@ -90,3 +90,20 @@ async def kis_get_raw_async(path: str, params: dict = None, tr_id: str = "", cus
         except: return None
 
     return await asyncio.to_thread(_fetch)
+
+async def kis_post_async(path: str, body: dict = None, tr_id: str = "", custtype: str = "P", use_real: bool = False):
+    """비동기 POST 호출 (주문/설정 변경용)"""
+    await ASYNC_LIMITER.wait()
+    
+    base = REAL_BASE_URL if use_real else BASE_URL
+    url = f"{base}{path}"
+    headers = get_headers(tr_id, custtype=custtype)
+    
+    def _post():
+        try:
+            res = session.post(url, headers=headers, json=body or {}, timeout=10)
+            return res.json()
+        except Exception as e:
+            return {"error": str(e)}
+
+    return await asyncio.to_thread(_post)

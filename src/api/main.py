@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from datetime import datetime
 import os
-from src.api.endpoints import account, stocks, explore, settings
+from src.api.endpoints import account, stocks, explore, settings, basket
 
 app = FastAPI(title="TrendHunter API Server")
 
@@ -22,6 +22,7 @@ app.include_router(account.router, prefix="/api")
 app.include_router(stocks.router, prefix="/api")
 app.include_router(explore.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
+app.include_router(basket.router, prefix="/api")
 
 # [v6.7] 빌드된 프론트엔드 정적 파일 서빙
 FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "trade-front", "dist")

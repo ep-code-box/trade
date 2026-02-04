@@ -221,6 +221,15 @@ def init_db():
         )
     """)
 
+    # 7. 매매 대기 바구니 (추가)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS basket (
+            symbol TEXT PRIMARY KEY,
+            name TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
     print("Database schema initialized successfully.")
