@@ -146,7 +146,7 @@ def save_to_db(conn, candidates, track_name, date):
     data = []
     for c in candidates:
         if track_name == 'TRACK2':
-            entry = 0; stop = 0; weight = "10%"
+            entry = c['close']; stop = 0; weight = "10%"
             rs = c.get('roe', 0)
             vcp = 0
             rationale = f"Yield {c['live_yield']:.1f}% / Payout {c['payout_ratio']:.0f}%"
