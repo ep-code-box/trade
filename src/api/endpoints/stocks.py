@@ -38,12 +38,19 @@ def get_available_dates():
 
 @router.get("/stocks")
 def get_stock_analysis(date: str = None):
-    """스크리너 결과 반환"""
+    """스크리너 결과 반환 (Track 1/2)"""
     try:
         conn = get_connection()
         if not date:
-            date = conn.execute("SELECT MAX(date) FROM trade_plan").fetchone()[0]
+            res = conn.execute("SELECT MAX(date) FROM trade_plan").fetchone()
+            date = res[0] if res else None
             
+        if not date:
+            return []
+
+        # [v5.9] 날짜 형식 호환성 처리 (하이픈 제거 버전과 원본 버전 둘 다 시도)
+        date_clean = date.replace('-', '')
+        
         query = """
             SELECT 
                 t.date, t.code as symbol, t.name, t.track, t.rs_score as rsScore, t.vcp_ratio as vcpRatio,
@@ -51,12 +58,13 @@ def get_stock_analysis(date: str = None):
                 d.close as curr_price, d.open, d.high_52w, d.dividend_yield as dividendYield,
                 m.roe, m.bsop_prfi, m.thtr_ntin, m.sale_account
             FROM trade_plan t
-            LEFT JOIN (SELECT * FROM daily_analysis WHERE date = ?) d ON t.code = d.code
+            LEFT JOIN daily_analysis d ON t.code = d.code AND (d.date = ? OR d.date = ?)
             LEFT JOIN master_info m ON t.code = m.code
-            WHERE t.date = ?
+            WHERE t.date = ? OR t.date = ?
             ORDER BY t.rs_score DESC
         """
-        df = pd.read_sql_query(query, conn, params=(date, date))
+        # t.date와 d.date 모두 두 가지 형식을 체크하도록 파라미터 전달
+        df = pd.read_sql_query(query, conn, params=(date, date_clean, date, date_clean))
         df = df.replace([float('inf'), float('-inf')], 0).fillna(0)
         conn.close()
 

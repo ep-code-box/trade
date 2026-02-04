@@ -155,9 +155,9 @@ const App: React.FC = () => {
             <Route path="/account" element={<AccountView />} />
             <Route path="/basket" element={<BasketView stocks={stocks.filter(s => basket.includes(s.symbol))} onToggleBasket={toggleBasket} />} />
             <Route path="/settings" element={<SettingsView />} />
-            <Route path="/track1" element={<Screener stocks={stocks.filter(s => s.track && (s.track.includes('1') || s.track.includes('TRACK_1')))} trackName={TrackType.TRACK_1} basket={basket} onToggleBasket={toggleBasket} />} />
-            <Route path="/trackex" element={<Screener stocks={stocks.filter(s => s.track && (s.track.includes('EX') || s.track.includes('Potential')))} trackName={TrackType.TRACK_EX} basket={basket} onToggleBasket={toggleBasket} />} />
-            <Route path="/track2" element={<Screener stocks={stocks.filter(s => s.track && (s.track.includes('2') || s.track.includes('TRACK_2') || s.track.includes('TRACK2')))} trackName={TrackType.TRACK_2} basket={basket} onToggleBasket={toggleBasket} />} />
+            <Route path="/track1" element={<Screener stocks={stocks.filter(s => s.track && (s.track.toUpperCase().includes('TRACK1') || s.track.toUpperCase().includes('STRICT')))} trackName={TrackType.TRACK_1} basket={basket} onToggleBasket={toggleBasket} />} />
+            <Route path="/trackex" element={<Screener stocks={stocks.filter(s => s.track && (s.track.toUpperCase().includes('EX') || s.track.toUpperCase().includes('POTENTIAL') || s.track.toUpperCase().includes('RELAXED')))} trackName={TrackType.TRACK_EX} basket={basket} onToggleBasket={toggleBasket} />} />
+            <Route path="/track2" element={<Screener stocks={stocks.filter(s => s.track && s.track.toUpperCase().includes('TRACK2'))} trackName={TrackType.TRACK_2} basket={basket} onToggleBasket={toggleBasket} />} />
             <Route path="/explore" element={<Explorer />} />
           </Routes>
         </main>

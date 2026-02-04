@@ -43,16 +43,59 @@ const SettingsView: React.FC = () => {
   });
 
   useEffect(() => {
-    const savedAi = localStorage.getItem('th_ai_config');
-    const savedRules = localStorage.getItem('th_trading_rules');
-    if (savedAi) setAiConfig(JSON.parse(savedAi));
-    if (savedRules) setRules(JSON.parse(savedRules));
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch('/api/settings');
+        const data = await res.json();
+        
+        if (data) {
+          // KIS Config Mapping
+          setKisConfig({
+            appKey: data.KIS_APP_KEY || '',
+            appSecret: data.KIS_APP_SECRET || '',
+            accountNumber: data.KIS_CANO || '',
+            isRealTrading: data.KIS_MODE === 'real',
+            vtsUrl: data.KIS_VTS_BASE_URL || 'https://openapivts.koreainvestment.com:29443',
+            realUrl: data.KIS_REAL_BASE_URL || 'https://openapi.koreainvestment.com:9443'
+          });
+
+          // AI & Rules Mapping (JSON string parsing)
+          if (data.th_ai_config) setAiConfig(JSON.parse(data.th_ai_config));
+          if (data.th_trading_rules) setRules(JSON.parse(data.th_trading_rules));
+        }
+      } catch (e) {
+        console.error("Failed to fetch settings from DB", e);
+      }
+    };
+    fetchSettings();
   }, []);
 
-  const saveAll = () => {
-    localStorage.setItem('th_ai_config', JSON.stringify(aiConfig));
-    localStorage.setItem('th_trading_rules', JSON.stringify(rules));
-    alert('모든 전략 및 시스템 설정이 로컬 DB에 저장되었습니다.');
+  const saveAll = async () => {
+    const payload = {
+      "KIS_APP_KEY": kisConfig.appKey,
+      "KIS_APP_SECRET": kisConfig.appSecret,
+      "KIS_CANO": kisConfig.accountNumber,
+      "KIS_MODE": kisConfig.isRealTrading ? 'real' : 'vts',
+      "th_ai_config": aiConfig,
+      "th_trading_rules": rules
+    };
+
+    try {
+      const res = await fetch('/api/settings/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (res.ok) {
+        alert('모든 설정이 서버 데이터베이스(DB)에 안전하게 저장되었습니다.');
+      } else {
+        throw new Error("Save failed");
+      }
+    } catch (e) {
+      alert('저장 중 오류가 발생했습니다.');
+      console.error(e);
+    }
   };
 
   const resetScreener = () => {
@@ -253,12 +296,35 @@ const SettingsView: React.FC = () => {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Account Number</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Account Number (8자리)</label>
                 <input 
                   type="text" 
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono text-white focus:border-blue-500 outline-none transition-all"
                   value={kisConfig.accountNumber}
                   onChange={(e) => setKisConfig({...kisConfig, accountNumber: e.target.value})}
+                  placeholder="예: 12345678"
+                />
+              </div>
+              
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">APP Key</label>
+                <input 
+                  type="password" 
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono text-white focus:border-blue-500 outline-none transition-all"
+                  value={kisConfig.appKey}
+                  onChange={(e) => setKisConfig({...kisConfig, appKey: e.target.value})}
+                  placeholder="한국투자증권에서 발급받은 APP Key"
+                />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">APP Secret</label>
+                <textarea 
+                  rows={3}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-xs font-mono text-white focus:border-blue-500 outline-none transition-all"
+                  value={kisConfig.appSecret}
+                  onChange={(e) => setKisConfig({...kisConfig, appSecret: e.target.value})}
+                  placeholder="한국투자증권에서 발급받은 APP Secret"
                 />
               </div>
             </div>

@@ -292,7 +292,8 @@ def generate_full_report():
         for s in sorted(strict_candidates, key=lambda x: x['rs_score'], reverse=True):
             print_stock_row(s)
         print("-" * 115)
-    elif relaxed_candidates:
+    
+    if relaxed_candidates:
         print(" [⚠️ TRACK 1: 현실적 차선책 (Relaxed 6%)] - 상위 RS 3선")
         # Relaxed는 상위 3개만 저장
         top3_relaxed = sorted(relaxed_candidates, key=lambda x: x['rs_score'], reverse=True)[:3]
@@ -300,7 +301,8 @@ def generate_full_report():
         for s in top3_relaxed:
             print_stock_row(s)
         print("-" * 115)
-    else:
+
+    if not strict_candidates and not relaxed_candidates:
         print(" [!] 현재 진입 가능한 생존 종목이 없습니다. 관망하십시오.")
         if failed_logs:
             print("\n [🔍 관망 브리핑: 주요 후보 탈락 사유 (RS Top 5)]")

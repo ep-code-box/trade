@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
-from src.api.endpoints import account, stocks, explore
+from src.api.endpoints import account, stocks, explore, settings
 
 app = FastAPI(title="TrendHunter API Server")
 
@@ -18,6 +18,7 @@ app.add_middleware(
 app.include_router(account.router, prefix="/api")
 app.include_router(stocks.router, prefix="/api")
 app.include_router(explore.router, prefix="/api")
+app.include_router(settings.router, prefix="/api")
 
 @app.get("/api/health")
 def health_check():
