@@ -70,6 +70,8 @@ def stop_bot():
 def get_all_settings():
     """DB에서 모든 시스템 설정을 가져옴"""
     try:
+        with open("api_access.log", "a") as f:
+            f.write("GET /settings called\n")
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("SELECT key, value FROM system_config")
@@ -77,7 +79,8 @@ def get_all_settings():
         conn.close()
         return {row[0]: row[1] for row in rows}
     except Exception as e:
-        return {"error": str(e)}
+        print(f"ERROR Fetching Settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/settings")
 def update_setting(config: ConfigUpdate):
