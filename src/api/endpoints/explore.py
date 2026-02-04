@@ -68,7 +68,8 @@ def explore_market(
                 "code": r[0], "name": r[1], "close": r[2],
                 "change": round((r[2]-r[3])/r[3]*100, 2) if r[3] > 0 else 0,
                 "amount": r[5], "rsScore": r[6] or 0, "marketType": r[11],
-                "marketCap": r[12], "volume": r[4]
+                "marketCap": r[12], "volume": r[4],
+                "high52w": r[13], "low52w": r[14]
             })
         conn.close()
         return {"items": results, "total": total_count, "page": page, "limit": limit, "date": latest_date}
