@@ -40,10 +40,13 @@ APP_KEY = db_conf.get("KIS_APP_KEY") or os.getenv("APP_KEY")
 APP_SECRET = db_conf.get("KIS_APP_SECRET") or os.getenv("APP_SECRET")
 MODE = db_conf.get("KIS_MODE") or os.getenv("MODE", "vts")
 
+REAL_BASE_URL = db_conf.get("KIS_REAL_BASE_URL") or "https://openapi.koreainvestment.com:9443"
+VTS_BASE_URL = db_conf.get("KIS_VTS_BASE_URL") or "https://openapivts.koreainvestment.com:29443"
+
 if MODE == "real":
-    BASE_URL = "https://openapi.koreainvestment.com:9443"
+    BASE_URL = REAL_BASE_URL
 else:
-    BASE_URL = "https://openapivts.koreainvestment.com:29443"
+    BASE_URL = VTS_BASE_URL
 
 def get_access_token():
     """Access Token 발급 및 DB 저장/조회 (만료 자동 갱신)."""

@@ -212,6 +212,15 @@ def init_db():
         )
     """)
 
+    # 6. 시스템 설정 테이블 (추가)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS system_config (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
     print("Database schema initialized successfully.")
