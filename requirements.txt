@@ -4,3 +4,4 @@ python-dotenv
 pyyaml
 fastapi
 uvicorn
+python-telegram-bot

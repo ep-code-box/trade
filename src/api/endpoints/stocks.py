@@ -38,19 +38,15 @@ def get_available_dates():
 
 @router.get("/stocks")
 def get_stock_analysis(date: str = None):
-    """스크리너 결과 반환 (Track 1/2)"""
+    """스크리너 결과 반환"""
     try:
         conn = get_connection()
         if not date:
             res = conn.execute("SELECT MAX(date) FROM trade_plan").fetchone()
             date = res[0] if res else None
-            
-        if not date:
-            return []
+        if not date: return []
 
-        # [v5.9] 날짜 형식 호환성 처리 (하이픈 제거 버전과 원본 버전 둘 다 시도)
         date_clean = date.replace('-', '')
-        
         query = """
             SELECT 
                 t.date, t.code as symbol, t.name, t.track, t.rs_score as rsScore, t.vcp_ratio as vcpRatio,
@@ -63,7 +59,6 @@ def get_stock_analysis(date: str = None):
             WHERE t.date = ? OR t.date = ?
             ORDER BY t.rs_score DESC
         """
-        # t.date와 d.date 모두 두 가지 형식을 체크하도록 파라미터 전달
         df = pd.read_sql_query(query, conn, params=(date, date_clean, date, date_clean))
         df = df.replace([float('inf'), float('-inf')], 0).fillna(0)
         conn.close()
@@ -89,28 +84,27 @@ def get_stock_analysis(date: str = None):
                 "template": { "priceAbove50": True, "sma200TrendingUp": True, "rsAbove70": True }
             })
         return results
-    except Exception as e:
-        return []
+    except: return []
 
 @router.get("/stocks/{code}/history")
 def get_stock_history(code: str):
-    """특정 종목의 최근 100일치 시세 및 SMA 21 반환"""
+    """특정 종목의 최근 250일치 시세 및 보조지표(SMA 21, 100 등) 계산 반환"""
     conn = get_connection()
-    query = "SELECT date, open, high, low, close, volume, sma_50, sma_150, sma_200 FROM daily_analysis WHERE code = ? ORDER BY date DESC LIMIT 150"
+    # SMA 200 계산을 위해 충분한 데이터(250일) 조회
+    query = "SELECT date, close, sma_50, sma_150, sma_200 FROM daily_analysis WHERE code = ? ORDER BY date DESC LIMIT 250"
     df = pd.read_sql_query(query, conn, params=(code,))
     if df.empty: return []
     
-    curr_price = df.iloc[0]['close']
-    df['close'] = df['close'].apply(lambda x: curr_price if x > curr_price * 10 else x)
-    # [v5.7] 기관 수급선 SMA 21 실시간 계산
+    # 날짜순 정렬 (과거 -> 현재)
     df = df.sort_values('date')
+    
+    # 보조지표 실시간 계산 (DB 미보유 필드)
     df['sma_21'] = df['close'].rolling(window=21).mean()
+    df['sma_100'] = df['close'].rolling(window=100).mean()
     
-    # NaN/Inf 처리 (JSON 직렬화 에러 방지)
+    # NaN 처리 및 최근 150일(6개월+)만 반환
     df = df.replace([float('inf'), float('-inf')], 0).fillna(0)
-    
-    # 다시 최근 100개만 자름
-    df = df.iloc[-100:]
+    result = df.iloc[-150:].to_dict(orient="records")
     
     conn.close()
-    return df.to_dict(orient="records")
+    return result

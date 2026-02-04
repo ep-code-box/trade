@@ -151,28 +151,55 @@ def print_account_info():
     print(f" 🛡️  감시가 기준 생존 수익 (Shield  ): {color_s}{s['total_survival_profit']:>12,} 원{reset}")
     print("-" * 90)
     
+    # 텔레그램 메시지 구성 (스승님 취향 저격)
+    tg_msg = f"<b>💰 TrendHunter 실전 생존 리포트</b>\n"
+    tg_msg += f"────────────────\n"
+    tg_msg += f"▶ 총 자산: {s['total_asset']:,}원\n"
+    tg_msg += f"▶ 예수금: {s['deposit']:,}원\n"
+    tg_msg += f"────────────────\n"
+    tg_msg += f"📈 <b>현재가 예상 손익 (Floating):</b> {s['total_floating_profit']:,}원\n"
+    tg_msg += f"🛡️ <b>감시가 생존 수익 (Shield):</b> {s['total_survival_profit']:,}원\n"
+    tg_msg += f"────────────────\n"
+
     if not result['holdings']:
         print(" [!] 보유 종목이 없습니다.")
+        tg_msg += " [!] 현재 보유 종목이 없습니다.\n"
     else:
-        print(f" {'종목명':<12} | {'수량':>4} | {'평단가':>8} | {'현재가':>8} | {'Shield':>8} | {'라운드손해':>10} | {'현재손익':>10}")
+        print(f" {'종목명':<12} | {'수량':>4} | {'평단가':>8} | {'현재가':>8} | {'Shield':>8} | {'이익쿠션':>10} | {'현재손익':>10}")
         print("-" * 90)
         for h in result['holdings']:
             shield_str = f"{int(h['stop_price']):,}" if h['stop_price'] > 0 else " 미설정 "
+            profit_cushion = int((h['curr_price'] - h['stop_price']) * h['qty']) if h['stop_price'] > 0 else 0
             
-            # 라운드 손해 = (현재가 - 감시가) * 수량 (즉, 감시가까지 떨어졌을 때 토해낼 수익)
-            round_loss = int((h['curr_price'] - h['stop_price']) * h['qty']) if h['stop_price'] > 0 else 0
-            
-            c_sl = "\033[93m" if round_loss > 0 else "" # 노란색 (토해낼 수익)
+            c_sl = "\033[93m" if profit_cushion > 0 else ""
             c_fp = "\033[92m" if h['floating_profit'] >= 0 else "\033[91m"
             
-            print(f" {h['name']:<12} | {h['qty']:>4,} | {int(h['buy_price']):>8,} | {h['curr_price']:>8,} | {shield_str:>8} | {c_sl}{round_loss:>10,}{reset} | {c_fp}{h['floating_profit']:>10,}{reset}")
+            print(f" {h['name']:<12} | {h['qty']:>4,} | {int(h['buy_price']):>8,} | {h['curr_price']:>8,} | {shield_str:>8} | {c_sl}{profit_cushion:>10,}{reset} | {c_fp}{h['floating_profit']:>10,}{reset}")
+            
+            # 텔레그램 메시지 구성
+            shield_tg = f"{int(h['stop_price']):,}" if h['stop_price'] > 0 else "미설정"
+            tg_msg += f"<b>[{h['name']}]</b>\n"
+            tg_msg += f" • 현재가: {h['curr_price']:,}원 ({h['return_rate']}%)\n"
+            tg_msg += f" • Shield: {shield_tg}원\n"
+            tg_msg += f" • <b>이익 쿠션: {profit_cushion:,}원</b>\n\n"
     
     risk_amt = int(s['total_asset'] * 0.01)
+    final_balance = s['total_asset'] - s['total_floating_profit'] + s['total_survival_profit']
+    
     print("-" * 90)
     print(f" 🛡️  초결벽주의 리스크 관리 (1% Rule)")
     print(f"  • 원금 대비 1% 허용 손실: {risk_amt:,} 원")
-    print(f"  • 감시가 체결 시 최종 잔고: {s['total_asset'] - s['total_floating_profit'] + s['total_survival_profit']:,} 원")
+    print(f"  • 감시가 체결 시 최종 잔고: {final_balance:,} 원")
     print("=" * 90)
+
+    tg_msg += f"────────────────\n"
+    tg_msg += f"⚠️ <b>리스크 관리 (1% Rule)</b>\n"
+    tg_msg += f" • 이번 라운드 허용 손실: {risk_amt:,}원\n"
+    tg_msg += f" • <b>감시가 체결 시 최종 잔고: {final_balance:,}원</b>"
+
+    # 텔레그램 전송
+    from src.utils.notifier import notifier
+    notifier.send_message(tg_msg)
 
 if __name__ == "__main__":
     print_account_info()

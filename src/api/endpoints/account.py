@@ -1,43 +1,33 @@
 from fastapi import APIRouter
 import os
 import requests
+import sqlite3
 from datetime import datetime
+from pydantic import BaseModel
 from src.auth import get_access_token, APP_KEY, APP_SECRET, BASE_URL, MODE, load_config_from_db
 
 router = APIRouter(tags=["account"])
 
+class ShieldUpdate(BaseModel):
+    symbol: str
+    price: int
+
 @router.get("/account")
 async def get_account_summary():
-    """계좌 요약 (KIS API 실시간 연동)"""
-    # DB 설정 로드
+    """계좌 요약 (KIS API 실시간 연동 + DB 감사 데이터 매칭)"""
     db_conf = {}
     try:
         db_conf = load_config_from_db()
-    except:
-        pass
+    except: pass
 
     cano = db_conf.get("KIS_CANO") or os.getenv("CANO")
     acnt_prdt_cd = db_conf.get("KIS_ACNT_PRDT_CD") or os.getenv("ACNT_PRDT_CD", "01")
 
-    # 설정 없으면 모의 데이터 반환
-    if not cano:
-        return {
-            "totalAsset": 50000000,
-            "cash": 15000000,
-            "totalProfit": 2450000,
-            "totalProfitRate": 5.2,
-            "buyingPower": 35000000,
-            "riskPerTradePercent": 1.0,
-            "positions": [] 
-        }
+    if not cano: return {"error": "Configuration missing"}
 
     try:
         token = get_access_token()
-        if not token:
-            raise Exception("Token generation failed")
-
         tr_id = "TTTC8434R" if MODE == "real" else "VTTC8434R"
-        
         headers = {
             "content-type": "application/json; charset=utf-8",
             "authorization": f"Bearer {token}",
@@ -46,7 +36,6 @@ async def get_account_summary():
             "tr_id": tr_id,
             "custtype": "P"
         }
-
         params = {
             "CANO": cano, "ACNT_PRDT_CD": acnt_prdt_cd, "AFHR_FLPR_YN": "N",
             "OFL_YN": "N", "INQR_DVSN": "02", "UNPR_DVSN": "01",
@@ -56,27 +45,15 @@ async def get_account_summary():
 
         res = requests.get(f"{BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance", headers=headers, params=params, timeout=10)
         data = res.json()
+        if data.get('rt_cd') != '0': return {"error": data.get('msg1')}
 
-        if data.get('rt_cd') != '0':
-            return {"totalAsset": 0, "cash": 0, "positions": [], "error": data.get('msg1')}
-
-        output1 = data.get('output1', [])
-        output2 = data.get('output2', [])
+        output1, output2 = data.get('output1', []), data.get('output2', [])
         summary = output2[0] if output2 else {}
-        
         total_asset = int(summary.get('tot_evlu_amt', 0) or 0)
         total_profit = int(summary.get('evlu_pfls_smtl_amt', 0) or 0)
         cash = int(summary.get('dnca_tot_amt', 0) or 0)
-        
-        total_profit_rate = 0.0
-        invested = total_asset - total_profit
-        if invested > 0:
-            total_profit_rate = round((total_profit / invested) * 100, 2)
 
-        # [v5.9] DB에서 종목 정보(섹터, RS 등) 가져오기
-        import sqlite3
         DB_PATH = "TrendHunter/db/stock_info.db"
-        
         positions = []
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -88,71 +65,90 @@ async def get_account_summary():
                 qty = int(item.get('hldg_qty', 0) or 0)
                 if qty <= 0: continue
 
-                # [v5.9] 올바른 테이블명과 컬럼명으로 정보 조회
-                sector = "기타"
-                rs_score = 50
+                sector, rs_score, manual_shield = "기타", 50, None
                 try:
-                    cur.execute("""
-                        SELECT s.category_name 
-                        FROM sectors_themes s 
-                        WHERE s.code = ? AND s.category_type = 'sector' 
-                        LIMIT 1
-                    """, (symbol,))
+                    # 1. 섹터 조회
+                    cur.execute("SELECT category_name FROM sectors_themes WHERE code = ? LIMIT 1", (symbol,))
                     row = cur.fetchone()
                     if row: sector = row['category_name']
 
-                    cur.execute("""
-                        SELECT rs_score FROM daily_analysis 
-                        WHERE code = ? 
-                        ORDER BY date DESC LIMIT 1
-                    """, (symbol,))
+                    # 2. RS 점수 조회
+                    cur.execute("SELECT rs_score FROM daily_analysis WHERE code = ? ORDER BY date DESC LIMIT 1", (symbol,))
                     row = cur.fetchone()
                     if row: rs_score = row['rs_score']
-                except:
-                    pass # DB 조회 실패해도 계속 진행
+
+                    # 3. Shield 조회 (수동 테이블 -> 계획 테이블 순서)
+                    cur.execute("SELECT manual_shield FROM account_positions_audit WHERE symbol = ?", (symbol,))
+                    row = cur.fetchone()
+                    if row and row['manual_shield']:
+                        manual_shield = int(row['manual_shield'])
+                    else:
+                        # 계획 테이블(trade_plan)에서 stop_price 조회
+                        cur.execute("SELECT stop_price FROM trade_plan WHERE code = ? ORDER BY date DESC LIMIT 1", (symbol,))
+                        row = cur.fetchone()
+                        if row: manual_shield = int(row['stop_price'])
+                except: pass
                 
                 avg_price = float(item.get('pchs_avg_pric', 0) or 0)
                 curr_price = int(item.get('prpr', 0) or 0)
-                profit_rate = float(item.get('evlu_pfls_rt', 0) or 0)
                 
-                # RS 트렌드 결정 (점수 기준)
-                rs_trend = 'rising' if rs_score >= 80 else 'flat'
-                vitality = int(rs_score)
-                curr_eval_amount = curr_price * qty
+                # Shield 결정: DB 값이 최우선 (28,000원 적용 지점)
+                sl = manual_shield if manual_shield else int(avg_price * 0.95)
 
                 positions.append({
-                    "symbol": symbol,
-                    "name": item.get('prdt_name'),
-                    "quantity": qty,
-                    "currentPrice": curr_price,
-                    "avgPrice": avg_price,
-                    "profitRate": profit_rate,
+                    "symbol": symbol, "name": item.get('prdt_name'), "quantity": qty,
+                    "currentPrice": curr_price, "avgPrice": avg_price,
+                    "profitRate": float(item.get('evlu_pfls_rt', 0) or 0),
                     "profit": int(item.get('evlu_pfls_amt', 0) or 0),
-                    "evalAmount": curr_eval_amount, # 비중 계산용 추가
-                    "status": "HEALTHY" if profit_rate > -3 else "CAUTION",
-                    "sector": sector,
-                    "initialStopLoss": int(avg_price * 0.95),
-                    "trailingStop": int(curr_price * 0.92),
-                    "breakEvenPrice": int(avg_price),
-                    "targetPrice": int(avg_price * 1.2),
-                    "daysHeld": 1, 
-                    "rsTrend": rs_trend,
-                    "vitalityScore": vitality,
+                    "status": "HEALTHY" if curr_price >= sl else "VIOLATED",
+                    "sector": sector, "trailingStop": sl, "manualShield": manual_shield,
+                    "vitalityScore": int(rs_score), "rsTrend": 'rising' if rs_score >= 80 else 'flat',
                     "entryDate": datetime.now().strftime('%Y-%m-%d')
                 })
             conn.close()
-        except Exception as db_e:
-            print(f"DB Enrichment Error: {db_e}")
+        except: pass
+
+        # 이번 주 실현 손익 조회
+        from datetime import timedelta
+        today = datetime.now()
+        monday = today - timedelta(days=today.weekday())
+        realized_profit = 0
+        if MODE == "real":
+            try:
+                r_headers = headers.copy()
+                r_headers["tr_id"] = "TTTC8715R"
+                r_params = {
+                    "CANO": cano, "ACNT_PRDT_CD": acnt_prdt_cd,
+                    "INQR_STRT_DT": monday.strftime('%Y%m%d'), "INQR_END_DT": today.strftime('%Y%m%d'),
+                    "SLL_BUY_DVSN_CD": "00", "INQR_DVSN": "00", "PDNO": "", "SORT_DVSN": "01", "CBLC_DVSN": "00",
+                    "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""
+                }
+                r_res = requests.get(f"{BASE_URL}/uapi/domestic-stock/v1/trading/inquire-period-trade-profit", headers=r_headers, params=r_params, timeout=10)
+                r_data = r_res.json()
+                if r_data.get('rt_cd') == '0':
+                    realized_profit = int(r_data.get('output2', {}).get('tot_rlzt_pfls', 0))
+            except: pass
 
         return {
-            "totalAsset": total_asset,
-            "cash": cash,
-            "totalProfit": total_profit,
-            "totalProfitRate": total_profit_rate,
-            "buyingPower": cash,
-            "riskPerTradePercent": 1.0,
-            "maxRiskAmount": int(total_asset * 0.01),
-            "positions": positions
+            "totalAsset": total_asset, "cash": cash, "totalProfit": total_profit,
+            "realizedPL": realized_profit, "maxRiskAmount": int(total_asset * 0.01), "positions": positions
         }
     except Exception as e:
-        return {"totalAsset": 0, "cash": 0, "positions": [], "error": str(e)}
+        return {"error": str(e)}
+
+@router.post("/account/shield")
+async def update_manual_shield(data: ShieldUpdate):
+    """특정 종목의 수동 쉴드(감시가) 업데이트"""
+    try:
+        DB_PATH = "TrendHunter/db/stock_info.db"
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO account_positions_audit (symbol, manual_shield, updated_at)
+            VALUES (?, ?, datetime('now', 'localtime'))
+        """, (data.symbol, data.price))
+        conn.commit()
+        conn.close()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

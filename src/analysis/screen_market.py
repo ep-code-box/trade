@@ -261,4 +261,41 @@ def generate_full_report():
 
     conn.commit(); conn.close()
 
+    # [v6.5] 텔레그램 브리핑 추가
+    try:
+        from src.utils.notifier import notifier
+        
+        tg_msg = f"🚀 <b>TrendHunter 스크린 리포트 ({max_date})</b>\n"
+        tg_msg += f"────────────────\n"
+        tg_msg += f"🌡️ 시장열기: Stage2 비율 {stage2_pct:.1f}%\n"
+        if 'theme_str' in locals():
+            tg_msg += f"🔥 주도섹터: {theme_str}\n"
+        tg_msg += f"────────────────\n"
+
+        if strict_candidates:
+            tg_msg += f"<b>🎯 TRACK 1 (Strict)</b>\n"
+            for s in sorted(strict_candidates, key=lambda x: x['rs_score'], reverse=True)[:5]:
+                entry, stop, weight, _ = calculate_survival_trade(s)
+                tg_msg += f" • {s['name']} (<code>{s['code']}</code>) RS {s['rs_score']:.0f}\n"
+                tg_msg += f"   🎯 {entry:,} | 🛡️ {stop:,} ({weight})\n"
+        
+        if relaxed_candidates:
+            tg_msg += f"\n<b>⚠️ TRACK 1 (Relaxed)</b>\n"
+            for s in sorted(relaxed_candidates, key=lambda x: x['rs_score'], reverse=True)[:3]:
+                entry, stop, weight, _ = calculate_survival_trade(s)
+                tg_msg += f" • {s['name']} (<code>{s['code']}</code>) RS {s['rs_score']:.0f}\n"
+                tg_msg += f"   🎯 {entry:,} | 🛡️ {stop:,} ({weight})\n"
+
+        if not div_df.empty:
+            tg_msg += f"\n<b>🛡️ TRACK 2 (Magic Formula)</b>\n"
+            for _, r in div_df.iterrows():
+                tg_msg += f" • {r['name']} (<code>{r['code']}</code>) 배당 {r['live_yield']:.1f}%\n"
+        
+        tg_msg += f"────────────────\n"
+        tg_msg += f"💡 <i>상세 데이터는 대시보드를 확인하세요.</i>"
+        
+        notifier.send_message(tg_msg)
+    except Exception as e:
+        print(f" [!] 텔레그램 전송 중 오류 발생: {e}")
+
 if __name__ == "__main__": generate_full_report()

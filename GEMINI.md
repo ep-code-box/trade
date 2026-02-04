@@ -48,19 +48,25 @@ The system consists of a robust **Python Backend Analysis Engine** and a modern 
 
 ---
 
-## 5. Design Constitution (Studio Minimalism)
+## 5. Design Constitution (Premium Studio Minimalism)
 
-### A. Visual Standardization
-- **Consistent Typography**: All data labels MUST use `text-[11px]`, **Bold**, and **Uppercase**. Primary metrics are standardized to `text-xl` or `text-2xl`. All numerical values MUST use a **Monospace font** to ensure perfect character alignment across columns.
-- **Restrained Color Palette**: Use `slate-950/900` for backgrounds and `slate-800` for borders. Color-code using `emerald` for Profit, `red` for Loss, and `orange` for Risk. Maintain ~80% saturation/opacity to prevent visual fatigue. Ban all excessive gradients, glows, or decorative animations.
+### A. Visual Standardization & Accents
+- **Uniform Typography**: Labels MUST use `text-[10px]`, **Black/Bold**, and **Uppercase** with tracking (`tracking-widest`). Primary values are standardized to `text-xl`. All numerical data MUST use a **Monospace font** (`font-mono`) for precision alignment.
+- **Premium Material**: Use `bg-slate-900/40` with `backdrop-blur-md` for panels. Elements should be separated by thin `divide-x` or `gap-px` lines using `slate-800/50`.
+- **Minimalist Indicators**: Instead of heavy icons, use **1px vertical accent bars** on the left of status cards to color-code metrics (Blue for Seed, Emerald for Profit, Orange for Risk).
 
-### B. Information Hierarchy (Risk-First)
-- **Primary Directives**: **Available Cash** and **Risk Limit (1% Rule)** must be the most prominent elements in any account-related view. The UI must answer "How much can I lose?" before "How much can I make?".
-- **Dynamic Seed Definition**: The system operates on the principle: "The current balance IS the seed." Historical principal is irrelevant; the **Current Total Equity** is the absolute baseline for all real-time risk and position sizing calculations.
+### B. Survival-First Hierarchy (The Cockpit)
+- **Essential Metrics**: The top dashboard MUST present the following five metrics in equal weight:
+    1. **Current Seed**: Total equity (the absolute baseline).
+    2. **Available**: Real-time buying power (Cash).
+    3. **Round P/L**: Live performance from entry (Floating profit).
+    4. **Shield P/L**: Guaranteed profit if stop-loss is triggered (Survival).
+    5. **Round Risk**: Potential profit giveaway (Current Price - Shield).
+- **Transparency**: Never hide the "ugly" numbers. If the round is in deficit, it must be displayed in `red` with a clear negative sign.
 
-### C. Layout & Uniformity
-- **Modular Grid**: All summary elements must have identical height, padding, and alignment. Use standardized components (e.g., `SummaryCard`) to enforce strict UI consistency.
-- **Responsive Grouping**: Information must be grouped logically (e.g., Cash paired with Risk Guide) and must maintain this relationship across mobile (2-column grid) and desktop (horizontal flex) layouts.
+### C. Tables & Interaction
+- **Information Density**: Tables MUST include `Shield (Stop-loss)`, `Round Loss`, and `Unrealized P/L` columns to mirror the CLI Survival Report.
+- **Interactive Audit**: Selecting a position triggers a detailed **Audit Panel** that evaluates rule compliance (Break-even, Chandelier Exit, etc.) and provides clear execution buttons (Pyramiding, Trim, Exit).
 
 ---
 
@@ -77,6 +83,11 @@ The system consists of a robust **Python Backend Analysis Engine** and a modern 
 ### C. Resource & State Management
 - **Mandatory Cleanup**: All temporary artifacts, intermediate data files, or transient logs generated during execution MUST be deleted immediately upon process completion.
 - **Stateless Operation**: The system should maintain a zero-footprint policy regarding temporary files.
+
+### D. Preservation & Atomic Changes
+- **Strict Scope Control**: Do NOT delete or modify existing fields, logic, or UI elements unless specifically instructed to do so. 
+- **Preservation Principle**: The agent must ensure that all previously implemented features and data columns are preserved when adding new functionality. 
+- **Atomic Modification**: Changes should be focused only on the requested area, maintaining the integrity of the surrounding code.
 
 ---
 
