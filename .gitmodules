@@ -1,0 +1,3 @@
+[submodule "trade-front"]
+	path = trade-front
+	url = https://github.com/ep-code-box/trade-front.git
