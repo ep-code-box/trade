@@ -33,11 +33,12 @@ const StockDetailChart: React.FC<StockDetailChartProps> = ({ stock, isInBasket, 
         if (data && data.length > 0) {
           const formatted = data.map((d: any) => ({
             ...d,
-            name: `${d.date.substring(4,6)}/${d.date.substring(6,8)}`,
-            price: Number(d.close),
-            sma50: d.sma_50 && d.sma_50 > 0 ? Number(d.sma_50) : null,
-            sma150: d.sma_150 && d.sma_150 > 0 ? Number(d.sma_150) : null,
-            sma200: d.sma_200 && d.sma_200 > 0 ? Number(d.sma_200) : null
+            name: d.date ? `${d.date.substring(4,6)}/${d.date.substring(6,8)}` : '',
+            price: Number(d.close || 0),
+            sma21: d.sma_21 ? Number(d.sma_21) : null,
+            sma50: d.sma_50 ? Number(d.sma_50) : null,
+            sma150: d.sma_150 ? Number(d.sma_150) : null,
+            sma200: d.sma_200 ? Number(d.sma_200) : null
           }));
           setChartData(formatted);
         }
@@ -104,7 +105,7 @@ const StockDetailChart: React.FC<StockDetailChartProps> = ({ stock, isInBasket, 
               <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} opacity={0.5} />
                 <XAxis dataKey="name" stroke="#475569" fontSize={8} tickLine={false} axisLine={false} interval={Math.floor(chartData.length / 6)} />
-                <YAxis domain={[(dataMin: number) => dataMin * 0.97, (dataMax: number) => Math.max(dataMax, targetPrice) * 1.03]} stroke="#475569" fontSize={10} axisLine={false} tickLine={false} tickFormatter={(val) => val.toLocaleString()} />
+                <YAxis domain={['auto', 'auto']} stroke="#475569" fontSize={10} axisLine={false} tickLine={false} tickFormatter={(val) => val.toLocaleString()} />
                 <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '10px' }} />
                 <Legend verticalAlign="top" align="right" height={36} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
                 
@@ -112,6 +113,7 @@ const StockDetailChart: React.FC<StockDetailChartProps> = ({ stock, isInBasket, 
                 <ReferenceLine y={targetPrice} stroke="#10b981" strokeDasharray="3 3" label={{ position: 'right', value: 'PIVOT', fill: '#10b981', fontSize: 10 }} />
 
                 <Line name="Price" type="monotone" dataKey="price" stroke="#ffffff" strokeWidth={2.5} dot={false} isAnimationActive={false} connectNulls />
+                <Line name="SMA 21" type="monotone" dataKey="sma21" stroke="#f87171" strokeWidth={2} dot={false} connectNulls />
                 <Line name="SMA 50" type="monotone" dataKey="sma50" stroke="#fbbf24" strokeWidth={2} dot={false} connectNulls />
                 <Line name="SMA 150" type="monotone" dataKey="sma150" stroke="#34d399" strokeWidth={2} dot={false} connectNulls />
                 <Line name="SMA 200" type="monotone" dataKey="sma200" stroke="#a78bfa" strokeWidth={2} dot={false} connectNulls />

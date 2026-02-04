@@ -7,7 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 from src.db import get_connection
-from src.analysis.screen_market import get_trend_candidates_db, get_supply_quality, check_chart_pattern, get_breakout_price, adjust_to_tick, get_themes_for_stock
+from src.analysis.screen_market import get_trend_candidates_db, get_supply_quality, check_chart_pattern_score, get_breakout_price, adjust_to_tick, get_themes_for_stock
+from src.account import get_account_balance
 
 app = FastAPI()
 
@@ -24,6 +25,17 @@ app.add_middleware(
 def get_status():
     return {"status": "ok", "message": "TrendHunter API is running"}
 
+@app.get("/api/account")
+def get_account_info():
+    """계좌 잔고 및 보유 종목 조회"""
+    try:
+        data = get_account_balance()
+        if not data:
+            return {"error": "Failed to fetch account data. Check logs."}
+        return data
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/api/candidates")
 def get_candidates():
     """스크리닝된 주도주 리스트 반환"""
@@ -34,7 +46,13 @@ def get_candidates():
         final_list = []
         for _, row in raw_df.iterrows():
             # 차트 및 수급 필터링
-            if not check_chart_pattern(row['code']): continue
+            vcp_score = check_chart_pattern_score(row['code'])
+            if vcp_score >= 999.0: continue # 데이터 부족 등
+            
+            # 여기서 4% 컷을 할지 말지는 선택 사항이나, API에서는 넉넉히 보내고 프론트에서 필터링 가능.
+            # 하지만 화면에 'Track 1'으로 보여주려면 어느 정도 필터링 필요.
+            if vcp_score > 0.08: continue 
+            
             quality = get_supply_quality(row['code'])
             if "이탈" in quality: continue
             
@@ -48,7 +66,7 @@ def get_candidates():
             stock_data = {
                 "code": row['code'],
                 "name": row['name'],
-                "close": row['close'],
+                "close": int(row['close']),
                 "rs_score": round(row['rs_score'], 1),
                 "sector": themes[0] if themes else "None",
                 "themes": themes,
