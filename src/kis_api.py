@@ -2,6 +2,7 @@
 import time
 import requests
 import asyncio
+import os
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from src.auth import get_access_token, APP_KEY, APP_SECRET, BASE_URL, REAL_BASE_URL
@@ -107,3 +108,39 @@ async def kis_post_async(path: str, body: dict = None, tr_id: str = "", custtype
             return {"error": str(e)}
 
     return await asyncio.to_thread(_post)
+
+# --- 서버 자동주문 (Stop-Order) 전용 함수 ---
+
+async def register_auto_order(symbol: str, side: str, price: int, qty: int = 1):
+    """
+    서버 자동주문 신규 등록 (TR: CTRP6010R)
+    side: 'BUY' (목표가 도달 시 매수) / 'SELL' (손절선 이탈 시 매도)
+    """
+    # 1: 이상(>=), 2: 이하(<=)
+    cond_dv = "1" if side == "BUY" else "2"
+    
+    body = {
+        "CANO": os.getenv("CANO"),
+        "ACNT_PRDT_CD": "01",
+        "PDNO": symbol,
+        "PRC_COND_DV": cond_dv,
+        "PRC_COND_PRC": str(price),
+        "ORD_DVSN": "01", # 시장가 주문
+        "ORD_QTY": str(qty),
+        "ORD_UNPR": "0",
+        "RE_ORD_YN": "N"  # 1회성 주문
+    }
+    
+    # 실전/모의에 따른 tr_id 분기
+    tr_id = "CTRP6010R" # 실전 기준 (모의투자 미지원 시 에러 발생 가능)
+    return await kis_post_async("/uapi/domestic-stock/v1/trading/auto-order-register", body=body, tr_id=tr_id)
+
+async def cancel_auto_order(symbol: str, order_num: str):
+    """서버 자동주문 취소/삭제 (TR: CTRP6014R)"""
+    body = {
+        "CANO": os.getenv("CANO"),
+        "ACNT_PRDT_CD": "01",
+        "PDNO": symbol,
+        "AUTO_ORD_SNO": order_num # 자동주문 일련번호
+    }
+    return await kis_post_async("/uapi/domestic-stock/v1/trading/auto-order-cancel", body=body, tr_id="CTRP6014R")

@@ -113,6 +113,23 @@ def get_access_token():
         print(f"🚨 Token Request Error: {e}")
         return None
 
+def get_websocket_approval_key():
+    """실시간 시세(Websocket)용 승인 키 발급."""
+    url = f"{BASE_URL}/oauth2/Approval"
+    headers = {"content-type": "application/json"}
+    body = {
+        "grant_type": "client_credentials",
+        "appkey": APP_KEY,
+        "secretkey": APP_SECRET,
+    }
+    try:
+        res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
+        if res.status_code == 200:
+            return res.json().get("approval_key")
+        return None
+    except:
+        return None
+
 if __name__ == "__main__":
     token = get_access_token()
     if token:
