@@ -13,9 +13,14 @@ async def fetch_dividend_sector_async(market_gb, sector_code):
     
     from datetime import datetime, timedelta
     now = datetime.now()
-    # [Trailing 12 Months] 오늘로부터 정확히 1년 전부터 조회
-    f_dt = (now - timedelta(days=365)).strftime("%Y%m%d")
-    t_dt = now.strftime("%Y%m%d")
+    
+    # [TrendHunter Policy] 18:00 이전에는 데이터 완결성을 위해 어제를 타겟으로 함
+    if now.hour < 18:
+        t_dt = (now - timedelta(days=1)).strftime("%Y%m%d")
+        f_dt = (datetime.strptime(t_dt, "%Y%m%d") - timedelta(days=365)).strftime("%Y%m%d")
+    else:
+        t_dt = now.strftime("%Y%m%d")
+        f_dt = (now - timedelta(days=365)).strftime("%Y%m%d")
     
     params = {
         "CTS_AREA": "", "GB1": market_gb, "UPJONG": sector_code,

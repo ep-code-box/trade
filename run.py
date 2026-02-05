@@ -34,6 +34,8 @@ COMMANDS = {
     "debug": "API 디버그 → python -m src.scripts.debug_api",
     "test-div": "배당 샘플 테스트 → python -m src.scripts.test_dividend_sample",
     "account": "계좌 잔고 조회 → python -m src.account",
+    "bot": "실시간 매매 봇 실행 (Local) → python -m src.jobs.trade_bot",
+    "server-bot": "서버 감시 자동주문 봇 실행 → python -m src.jobs.trade_bot_server",
 }
 
 
@@ -74,6 +76,8 @@ def main():
         "debug": ("src.scripts.debug_api", "debug_check"),
         "test-div": ("src.scripts.test_dividend_sample", "run_sample_test"),
         "account": ("src.account", "print_account_info"),
+        "bot": ("src.jobs.trade_bot", "TradeBot"),
+        "server-bot": ("src.jobs.trade_bot_server", "ServerTradeBot"),
     }
     mod_name, fn_name = runners[cmd]
     import importlib
@@ -82,6 +86,10 @@ def main():
         # __main__ 블록 실행 (db_sync, db_sync_themes)
         import runpy
         runpy.run_path(mod.__file__, run_name="__main__")
+    elif cmd in ["bot", "server-bot"]:
+        # 클래스 인스턴스화 후 run() 실행
+        cls = getattr(mod, fn_name)
+        cls().run()
     else:
         getattr(mod, fn_name)()
     return 0

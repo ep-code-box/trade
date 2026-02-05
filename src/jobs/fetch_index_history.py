@@ -109,9 +109,16 @@ def save_index_to_db(code, data_list):
 
 def main():
     targets = [("0001", "KOSPI"), ("1001", "KOSDAQ")]
-    end_date = datetime.now().strftime("%Y%m%d")
+    
+    # [TrendHunter Policy] 18:00 이전에는 어제를 기준일로 삼음
+    now = datetime.now()
+    if now.hour < 18:
+        end_date = (now - timedelta(days=1)).strftime("%Y%m%d")
+    else:
+        end_date = now.strftime("%Y%m%d")
+        
     # 2년치 데이터 확보 (200일선 계산용)
-    start_date = (datetime.now() - timedelta(days=730)).strftime("%Y%m%d")
+    start_date = (datetime.strptime(end_date, "%Y%m%d") - timedelta(days=730)).strftime("%Y%m%d")
     
     print(f"Updating Index History ({start_date} ~ {end_date})...")
     

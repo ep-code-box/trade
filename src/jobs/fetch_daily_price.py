@@ -68,7 +68,14 @@ def save_batch_fast(results):
 async def main_async():
     global api_call_count
     if not get_access_token(): return
-    today_str = datetime.now().strftime("%Y%m%d")
+    
+    # [TrendHunter Policy] 18:00 이전에는 데이터 완결성을 위해 어제를 타겟으로 함
+    now = datetime.now()
+    if now.hour < 18:
+        today_str = (now - timedelta(days=1)).strftime("%Y%m%d")
+    else:
+        today_str = now.strftime("%Y%m%d")
+        
     conn = get_connection()
     stocks = pd.read_sql_query("SELECT code, name FROM master_info WHERE LENGTH(code) IN (4, 6)", conn)
     stocks = pd.concat([stocks, pd.DataFrame([{"code":"0001","name":"KOSPI"},{"code":"1001","name":"KOSDAQ"}])]).drop_duplicates(subset=["code"])

@@ -38,9 +38,27 @@
 *   **Master Dashboard**: `/api/summary`를 통해 시장의 '생존 가능성'을 먼저 진단.
 *   **Technical View**: Track 1 종목은 3색 이평선과 PIVOT/STOP 라인을 통한 돌파 매매 시점 포착.
 *   **Fundamental View**: Track 2 종목은 이평선보다 ROE, 영업이익률, 연간 예상 DPS 현금흐름에 집중.
+*   **Survival Chart [v9.5]**: 
+    *   **Viewport Optimization**: 브라우저 높이에 따른 유동적 차트 크기 조절 (`max-height` 최적화).
+    *   **Internal Navigation**: 상세 분석 내용이 길어질 경우 차트 영역 내 개별 스크롤을 통해 정보 무결성 유지.
+    *   **Precision UI**: X축 라벨 컷오프 방지 및 3/4 비율의 황금비 상세 차트 적용.
 
 ---
 
-## 4. 운영자의 행동 지침 (AI Mentor's Directive)
+## 4. 자동 매매 엔진 (Execution Engine - Beta)
+
+### 4.1 실시간 자동 매수 (Auto-Buy)
+*   **Pivot Breakout**: 매매 바구니(Basket)에 담긴 종목이 당일 산출된 `entry_price`를 상향 돌파할 때 주문 집행.
+*   **Market Order**: 돌파 즉시 시장가 주문을 통해 확실한 체결 우선.
+*   **Safety Lock**: 현재 `SAFETY_MODE` 운영 중으로, 검증 단계에서는 텔레그램 알림 후 사용자가 최종 승인 가능.
+
+### 4.2 지능형 트레일링 스탑 (Trailing Stop / Shield)
+*   **Profit Protection**: 매수 후 가격 상승 시, **역대 최고가(HWM) 대비 5% 하락 지점**으로 손절선(Shield)을 자동 상향 조정.
+*   **Survivor Exit**: 가격이 갱신된 Shield를 하향 이탈할 경우 즉시 전량 매도하여 수익을 보존.
+*   **Track Isolation**: 장기 보유 목적의 TRACK 2(배당주)는 자동 매도 대상에서 제외하여 전략적 분리 운영.
+
+---
+
+## 5. 운영자의 행동 지침 (AI Mentor's Directive)
 > "매일 매매하는 사람은 바보다. 현금도 비중이고, 인내는 가장 비싼 수업료다."
 > 시스템은 데이터의 노예가 되어야 하며, 감정이 개입되는 순간 파멸임을 명심하십시오.

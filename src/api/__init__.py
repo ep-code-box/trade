@@ -1,1 +1,1 @@
-from src.api.main import app
+# Package marker

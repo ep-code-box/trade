@@ -40,6 +40,14 @@ def update_supply_batch_sync(results):
 
 async def main_async():
     if not get_access_token(): return
+    
+    # [TrendHunter Policy] 18:00 이전에는 수급 정산이 미완료되므로 어제를 타겟으로 함
+    now = datetime.now()
+    if now.hour < 18:
+        end_date = (now - timedelta(days=1)).strftime("%Y%m%d")
+    else:
+        end_date = now.strftime("%Y%m%d")
+        
     conn = get_connection()
     stocks = pd.read_sql_query("SELECT code, name FROM master_info WHERE LENGTH(code) = 6", conn)
     max_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
@@ -50,7 +58,6 @@ async def main_async():
 
     target_stocks = stocks[~stocks['code'].isin(completed_codes)]
     total = len(target_stocks)
-    end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
 
     print(f"🚀 수급 비동기 고속 수집 시작: {total}개 종목 (Target: 20 TPS)")

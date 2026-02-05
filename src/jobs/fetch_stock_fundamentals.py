@@ -39,7 +39,13 @@ def get_best_stat(data_list):
 
 def batch_update_db_final(conn, results):
     cur = conn.cursor()
-    today = datetime.now().strftime("%Y%m%d")
+    
+    # [TrendHunter Policy] 18:00 이전에는 어제를 기준일로 삼음
+    now = datetime.now()
+    if now.hour < 18:
+        today = (now - timedelta(days=1)).strftime("%Y%m%d")
+    else:
+        today = now.strftime("%Y%m%d")
     
     for res in results:
         code = res["code"]

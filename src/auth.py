@@ -130,6 +130,22 @@ def get_websocket_approval_key():
     except:
         return None
 
+def issue_hashkey(body: dict):
+    """[KIS 정석] 주문 POST 요청을 위한 해쉬키 발급."""
+    url = f"{BASE_URL}/uapi/hashkey"
+    headers = {
+        "content-type": "application/json",
+        "appkey": APP_KEY,
+        "appsecret": APP_SECRET,
+    }
+    try:
+        res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
+        if res.status_code == 200:
+            return res.json().get("HASH")
+        return None
+    except:
+        return None
+
 if __name__ == "__main__":
     token = get_access_token()
     if token:

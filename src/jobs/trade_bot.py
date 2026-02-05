@@ -10,7 +10,7 @@ from src.auth import MODE, load_config_from_db, APP_KEY, APP_SECRET, BASE_URL
 from src.utils.notifier import notifier
 
 # --- 설정 ---
-SAFETY_MODE = True  # True: 실제 주문 안함, 알림만 전송 | False: 실제 주문 실행
+SAFETY_MODE = False  # True: 실제 주문 안함, 알림만 전송 | False: 실제 주문 실행
 
 class TradeBot:
     def __init__(self):

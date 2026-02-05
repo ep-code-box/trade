@@ -77,7 +77,8 @@ def save_to_db(df, market_type):
 
 def main():
     init_db()
-    parse_mst_standard(os.path.join(ROOT, "kospi_code.mst"), "KOSPI")
-    parse_mst_standard(os.path.join(ROOT, "kosdaq_code.mst"), "KOSDAQ")
+    tmp_dir = os.path.join(ROOT, "TrendHunter", "tmp")
+    parse_mst_standard(os.path.join(tmp_dir, "kospi_code.mst"), "KOSPI")
+    parse_mst_standard(os.path.join(tmp_dir, "kosdaq_code.mst"), "KOSDAQ")
 
 if __name__ == "__main__": main()

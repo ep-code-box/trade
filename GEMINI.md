@@ -16,6 +16,9 @@ The system consists of a robust **Python Backend Analysis Engine** and a modern 
 ### B. 퀀트 필터 및 생존 원칙 (Quant & Survival)
 - **생존자 필터 (Survival First)**: 현재가가 시스템이 계산한 **손절선(Shield) 아래에 있는 종목은 리포트에서 즉시 제명**한다. "죽은 자는 말이 없다."
 - **강자 존중 (RS Sorting)**: 모든 필터를 통과한 종목은 **RS Score 내림차순**으로 정렬하여 시장 대장주를 최상단에 배치한다. "가장 강한 놈에게 먼저 베팅하라."
+- **기계적 집행 (Auto-Execution)**: 
+    - **매수**: 산출된 Pivot 가격 돌파 시 감정 없이 즉시 진입한다.
+    - **보존**: 수익 발생 시 최고가 대비 5% 지점(Trailing Stop)으로 Shield를 끌어올려 '이미 번 돈'을 사수한다.
 
 ---
 
@@ -67,6 +70,7 @@ The system consists of a robust **Python Backend Analysis Engine** and a modern 
 ### C. Tables & Interaction
 - **Information Density**: Tables MUST include `Shield (Stop-loss)`, `Round Loss`, and `Unrealized P/L` columns to mirror the CLI Survival Report.
 - **Interactive Audit**: Selecting a position triggers a detailed **Audit Panel** that evaluates rule compliance (Break-even, Chandelier Exit, etc.) and provides clear execution buttons (Pyramiding, Trim, Exit).
+- **Viewport Resilience [v9.5]**: Complex UI components (like charts) MUST adapt to the available viewport height. Use `max-height` with `calc()` and enable internal `overflow-y-auto` to prevent global layout breakage while ensuring all data remains accessible.
 
 ---
 

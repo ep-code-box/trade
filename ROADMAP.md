@@ -15,21 +15,22 @@ TrendHunter는 단순한 스크리닝 도구를 넘어, **시각적 데이터 �
 | **Logic** | RS 점수 계산 | ✅ | `run rs` (시장 상대강도 0-99) |
 | | 전략 리포팅 | ✅ | `run screen` (Track 1/2/EX 통합 리포트) |
 | | 매매 계획 수립 | ✅ | `trade_plan` 테이블에 진입가/손절가 자동 저장 |
-| **UI** | 웹 대시보드 | ⚠️ | React 프론트엔드(`dashboard/`) + FastAPI(`src/api.py`) 연동 (Beta) |
-| **Trade** | 자동 매수 주문 | ❌ | `trade_plan` 기반 자동 주문 집행 모듈 개발 필요 |
+| **UI** | 웹 대시보드 | ✅ | React 프론트엔드(`trade-front/`) + FastAPI 연동 (v9.5 최적화 완료) |
+| **Trade** | 자동 매수 주문 | ⚠️ | `trade_bot.py` 구현 완료, 현재 실계좌 검증 및 안전 모드 테스트 중 |
 | **Cloud** | GCP 배포 | ❌ | Cloud Scheduler + Cloud Run 구성 예정 |
 
 ---
 
 ## 3. 상세 로드맵 (Detailed Plans)
 
-### 3.1 [Phase 1] 대시보드 고도화 (Current)
-현재 CLI 기반의 리포트를 웹 브라우저에서 시각적으로 확인할 수 있도록 합니다.
-*   **API 서버**: `src/api.py` (FastAPI) 기능 확장 (종목 상세, 차트 데이터 제공).
-*   **UI 개발**: `dashboard/` (React+Vite)
-    *   **Dashboard**: 오늘의 추천 종목(Track 1/2) 카드 뷰.
-    *   **Chart**: TradingView 라이브러리 등을 활용한 VCP 패턴 시각화.
-    *   **Interactive**: 사용자가 직접 차트에 지지/저항선을 긋거나 메모를 남기는 기능.
+### 3.1 [Phase 1] 대시보드 고도화 (Complete - v9.5)
+현재 CLI 기반의 리포트를 웹 브라우저에서 시각적으로 확인할 수 있도록 합니다. (기능 완성 및 레이아웃 최적화 완료)
+*   **API 서버**: `src/api/` (FastAPI) 연동 및 히스토리 데이터 제공.
+*   **UI 개발**: `trade-front/` (React+Vite + TailwindCSS)
+    *   **Dashboard**: 시장 온도계 및 주도주 퍼포먼스 차트.
+    *   **Survival Chart**: 손절선(Shield) 시각화 및 포지션 사이징 계산기 통합.
+    *   **Layout Fix [v9.5]**: 모바일 및 다양한 해상도에서의 차트 잘림 방지 및 뷰포트 최적화 적용.
+    *   **Explorer**: 실시간 퀀트 엔진 탐색기 구현.
 
 ### 3.2 [Phase 2] 자동 매매 (Execution)
 리포트에서 선정된 종목을 실제 계좌로 매매합니다.
