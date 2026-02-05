@@ -65,7 +65,7 @@ async def get_account_summary():
                 qty = int(item.get('hldg_qty', 0) or 0)
                 if qty <= 0: continue
 
-                sector, rs_score, manual_shield = "기타", 50, None
+                sector, rs_score, manual_shield, highest_price = "기타", 50, None, 0
                 try:
                     # 1. 섹터 조회
                     cur.execute("SELECT category_name FROM sectors_themes WHERE code = ? LIMIT 1", (symbol,))
@@ -77,13 +77,15 @@ async def get_account_summary():
                     row = cur.fetchone()
                     if row: rs_score = row['rs_score']
 
-                    # 3. Shield 조회 (수동 테이블 -> 계획 테이블 순서)
-                    cur.execute("SELECT manual_shield FROM account_positions_audit WHERE symbol = ?", (symbol,))
+                    # 3. Shield 및 최고가 조회 (봇이 업데이트한 트레일링 스탑 포함)
+                    cur.execute("SELECT manual_shield, highest_price FROM account_positions_audit WHERE symbol = ?", (symbol,))
                     row = cur.fetchone()
-                    if row and row['manual_shield']:
-                        manual_shield = int(row['manual_shield'])
-                    else:
-                        # 계획 테이블(trade_plan)에서 stop_price 조회
+                    if row:
+                        manual_shield = int(row['manual_shield']) if row['manual_shield'] else None
+                        highest_price = int(row['highest_price']) if row['highest_price'] else 0
+                    
+                    if not manual_shield:
+                        # 계획 테이블(trade_plan)에서 기본 stop_price 조회
                         cur.execute("SELECT stop_price FROM trade_plan WHERE code = ? ORDER BY date DESC LIMIT 1", (symbol,))
                         row = cur.fetchone()
                         if row: manual_shield = int(row['stop_price'])
@@ -92,7 +94,7 @@ async def get_account_summary():
                 avg_price = float(item.get('pchs_avg_pric', 0) or 0)
                 curr_price = int(item.get('prpr', 0) or 0)
                 
-                # Shield 결정: DB 값이 최우선 (28,000원 적용 지점)
+                # Shield 결정: DB 값이 최우선
                 sl = manual_shield if manual_shield else int(avg_price * 0.95)
 
                 positions.append({
@@ -102,6 +104,7 @@ async def get_account_summary():
                     "profit": int(item.get('evlu_pfls_amt', 0) or 0),
                     "status": "HEALTHY" if curr_price >= sl else "VIOLATED",
                     "sector": sector, "trailingStop": sl, "manualShield": manual_shield,
+                    "highestPrice": highest_price,
                     "vitalityScore": int(rs_score), "rsTrend": 'rising' if rs_score >= 80 else 'flat',
                     "entryDate": datetime.now().strftime('%Y-%m-%d')
                 })
