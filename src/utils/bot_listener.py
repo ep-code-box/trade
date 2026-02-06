@@ -3,6 +3,8 @@ import os
 import sqlite3
 import asyncio
 import logging
+import subprocess
+import sys
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 from dotenv import load_dotenv
@@ -15,7 +17,11 @@ from src.config import ROOT
 load_dotenv(os.path.join(ROOT, ".env"))
 
 # 로그 설정
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(ROOT, "TrendHunter", "db", "stock_info.db")
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -65,29 +71,50 @@ async def post_init(application):
     await application.bot.set_my_commands(commands)
 
 async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/log: 마지막 로그 15줄 전송."""
-    log_path = "/Users/lastep/.gemini/tmp/829414b42c4091ffd2123bb2379d37acc153d7eb78b5cb6757928f9aea8b72a1/bot_listener_menu.log"
+    """/log: 파이프라인 최신 로그 15줄 전송."""
+    log_path = "/tmp/pipeline.log"
     try:
         if os.path.exists(log_path):
             with open(log_path, 'r') as f:
                 lines = f.readlines()
                 last_logs = "".join(lines[-15:])
-                await update.message.reply_html(f"<b>📄 최근 시스템 로그</b>\n<pre>{last_logs}</pre>")
+                await update.message.reply_html(f"<b>📄 파이프라인 로그 (최근 15줄)</b>\n<pre>{last_logs}</pre>")
         else:
-            await update.message.reply_text("로그 파일을 찾을 수 없습니다.")
+            await update.message.reply_text("파이프라인 로그 파일을 찾을 수 없습니다. 아직 실행 전이거나 경로를 확인하세요.")
     except Exception as e:
         await update.message.reply_text(f"로그 조회 실패: {e}")
 
 async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/update: 데이터 파이프라인 즉시 실행."""
-    from run_daily import main as run_daily_main
-    import threading
+    """/update: 데이터 파이프라인 즉시 실행 (정석 구현)."""
+    logger.info(">>> /update 명령어 수신됨")
     
     await update.message.reply_text("🔄 <b>데이터 동기화 및 RS 분석을 시작합니다.</b>\n(완료 시 리포트가 자동 전송됩니다.)", parse_mode="HTML")
     
-    # 백그라운드 스레드에서 실행
-    thread = threading.Thread(target=run_daily_main)
-    thread.start()
+    # 실행 환경 구축
+    script_path = os.path.join(ROOT, "run_daily.py")
+    log_file = open("/tmp/pipeline.log", "a")
+    
+    # PYTHONPATH 강제 주입: ROOT를 맨 앞에 배치
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{ROOT}:{env.get('PYTHONPATH', '')}"
+    
+    # subprocess 실행 흐름: 
+    # 1. sys.executable을 사용하여 현재 파이썬 인터프리터 유지
+    # 2. stdout/stderr를 별도 파일로 리다이렉트하여 로그 격리
+    # 3. start_new_session=True로 부모 프로세스와의 생명주기 분리 (완전 독립)
+    try:
+        subprocess.Popen(
+            [sys.executable, "-u", script_path],
+            env=env,
+            cwd=ROOT,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True
+        )
+        logger.info(f"파이프라인 독립 프로세스 가동 성공 (CWD: {ROOT})")
+    except Exception as e:
+        logger.error(f"파이프라인 가동 실패: {str(e)}")
+        await update.message.reply_text(f"❌ 가동 실패: {str(e)}")
 
 async def cmd_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from src.account import print_account_info
@@ -104,12 +131,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text += "1. <b>종목 질의</b>: 종목명(예: 액트로)이나 티커(290740)를 입력하면 실시간 시세와 이익 쿠션을 분석합니다.\n"
     help_text += "2. <b>/account</b>: 현재 내 계좌의 생존 상태를 확인합니다.\n"
     help_text += "3. <b>/screen</b>: 시장 주도주와 배당 마법공식 추천주를 즉시 분석합니다.\n"
+    help_text += "4. <b>/update</b>: 전체 데이터 동기화 파이프라인을 실행합니다.\n"
+    help_text += "5. <b>/log</b>: 현재 실행 중인 파이프라인의 로그를 확인합니다.\n"
     await update.message.reply_html(help_text)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     query = update.message.text.strip()
-    if query.startswith('/'): return # 명령어는 여기서 처리 안함
+    if query.startswith('/'): return
 
     stock = resolve_stock(query)
     if not stock:

@@ -12,10 +12,29 @@ from src.analysis.recalc_indicators import recalc_all
 from src.analysis.calc_rs_score import calc_rs_scores_flexible
 from src.analysis.screen_market import generate_full_report
 
+def cleanse_today():
+    from datetime import datetime, timedelta
+    from src.db import get_connection
+    now = datetime.now()
+    target_date = now.strftime("%Y%m%d") if now.hour >= 18 else (now - timedelta(days=1)).strftime("%Y%m%d")
+    
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM daily_analysis WHERE date = ?", (target_date,))
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    if deleted > 0:
+        print(f"   🧹 클렌징 완료: {target_date} 데이터 {deleted}건 삭제")
+
 def main():
     print("=" * 70)
     print(f" [TrendHunter] 일일 통합 데이터 분석 파이프라인 가동")
     print("=" * 70)
+
+    # 0단계: 클렌징 작업 추가
+    print("\n[진행] 0. 데이터 클렌징 (무결성 보장)...")
+    cleanse_today()
 
     # 파이프라인 단계 정의
     steps = [

@@ -62,7 +62,8 @@ def save_batch_fast(results):
     try:
         conn.executemany("INSERT OR IGNORE INTO daily_analysis (date, code, open, high, low, close, volume, amount, rs_score) VALUES (?,?,?,?,?,?,?,?,?)", data)
         conn.commit()
-    except: pass
+    except Exception as e:
+        print(f"DB 저장 중 오류 발생: {e}")
     conn.close()
 
 async def main_async():
@@ -77,6 +78,10 @@ async def main_async():
         today_str = now.strftime("%Y%m%d")
         
     conn = get_connection()
+    # [Clean Start] 오늘자 불완전 데이터 강제 삭제 (무결성 보장)
+    conn.execute("DELETE FROM daily_analysis WHERE date = ?", (today_str,))
+    conn.commit()
+    
     stocks = pd.read_sql_query("SELECT code, name FROM master_info WHERE LENGTH(code) IN (4, 6)", conn)
     stocks = pd.concat([stocks, pd.DataFrame([{"code":"0001","name":"KOSPI"},{"code":"1001","name":"KOSDAQ"}])]).drop_duplicates(subset=["code"])
     df_status = pd.read_sql_query("SELECT code, MAX(date) as last_date FROM daily_analysis GROUP BY code", conn)
@@ -103,7 +108,7 @@ async def main_async():
         completed += 1
         
         if len(batch) >= 100 or completed == total:
-            asyncio.create_task(asyncio.to_thread(save_batch_fast, list(batch)))
+            await asyncio.to_thread(save_batch_fast, list(batch))
             batch = []
             
         if completed % 100 == 0 or completed == total:

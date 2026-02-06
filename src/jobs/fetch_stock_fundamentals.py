@@ -6,7 +6,7 @@
 import asyncio
 import time
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from src.auth import get_access_token
 from src.db import get_connection
 from src.kis_api import kis_get_raw_async
