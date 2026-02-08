@@ -4,6 +4,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from datetime import datetime
 import os
+import sys
+
+print(f"--- Server running with Python: {sys.executable} ---")
+
 from src.api.endpoints import account, stocks, explore, settings, basket
 
 app = FastAPI(title="TrendHunter API Server")
@@ -23,6 +27,11 @@ app.include_router(stocks.router, prefix="/api")
 app.include_router(explore.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(basket.router, prefix="/api")
+
+@app.on_event("startup")
+async def startup_event():
+    """서버 시작 시 로컬 LLM을 미리 로드하여 메모리에 상주시킴"""
+    stocks.init_llm()
 
 # [v6.7] 빌드된 프론트엔드 정적 파일 서빙
 FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "trade-front", "dist")
@@ -48,4 +57,5 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

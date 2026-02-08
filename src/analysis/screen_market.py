@@ -221,6 +221,32 @@ def generate_full_report():
         for s in top3_relaxed: print_stock_row(s)
         print("-" * 115)
 
+    # [v5.6] TRACK EX: 전설들의 대장주 매복 (명시적 관찰 대상)
+    ex_codes = ["126340", "389030", "299170", "298830"]
+    query_ex = f"""
+    SELECT 
+        d.date, d.code, m.name, m.market_type,
+        d.close, d.amount, d.volume, d.rs_score,
+        (d.vol_std_10d / d.vol_std_50d) as vcp_ratio,
+        d.high_52w, d.low_52w, d.sma_20, d.sma_50, d.sma_150, d.sma_200,
+        d.volume_sma_50, m.roe, m.bsop_prfi, m.thtr_ntin
+    FROM daily_analysis d
+    JOIN master_info m ON d.code = m.code
+    WHERE d.date = '{max_date}' AND d.code IN ({','.join(['?' for _ in ex_codes])})
+    """
+    ex_df = pd.read_sql_query(query_ex, conn, params=ex_codes)
+    
+    if not ex_df.empty:
+        print(" [🚀 TRACK EX: 전설들의 매복 (Elite Watchlist)]")
+        ex_candidates = []
+        for _, row in ex_df.iterrows():
+            row['vcp_score'] = check_chart_pattern_score(row['code'])
+            row['quality'] = get_supply_quality(row['code'])
+            ex_candidates.append(row)
+            print_stock_row(row)
+        save_to_db(conn, ex_candidates, 'TRACK_EX', max_date)
+        print("-" * 115)
+
     # TRACK 2: Dividend Magic Formula (v6.4 Final)
     query_div = f"""
     SELECT 
