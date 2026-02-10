@@ -4,10 +4,15 @@ from datetime import datetime
 from src.db import get_connection
 from src.api.utils import get_db_row_dict
 from src.utils.notifier import notifier
-import google.generativeai as genai
 import json
 
 router = APIRouter(tags=["stocks"])
+
+try:
+    import google.generativeai as genai
+    HAS_GENAI = True
+except ImportError:
+    HAS_GENAI = False
 
 def init_llm():
     """백엔드 통합 초기화 (현재는 로깅만 수행)"""
@@ -38,6 +43,9 @@ def get_ai_analysis(code: str, persona: str = "LIVERMORE"):
 
         if not row or not res:
             return {"analysis": "데이터 또는 AI 설정을 찾을 수 없습니다."}
+
+        if not HAS_GENAI:
+            return {"analysis": "AI 라이브러리(google-generativeai)가 설치되어 있지 않습니다. 서버 관리자에게 문의하세요."}
 
         config = json.loads(res[0])
         api_key = config.get('apiKey')
@@ -114,12 +122,58 @@ def get_available_dates():
 def get_market_summary():
     try:
         conn = get_connection()
+        # 1. 기준일 확보
         max_date = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()[0]
-        query = "SELECT rs_score FROM daily_analysis WHERE code = '0001' AND date = ?"
-        res = conn.execute(query, (max_date,)).fetchone()
+        if not max_date:
+            conn.close()
+            return {"error": "no data"}
+
+        # 2. 시장 RS (KOSPI 기준)
+        res_rs = conn.execute("SELECT rs_score FROM daily_analysis WHERE code = '0001' AND date = ?", (max_date,)).fetchone()
+        market_rs = res_rs[0] if res_rs else 0
+
+        # 3. Stage 2 비율 (정배열 종목 비율)
+        total_cnt = conn.execute("SELECT COUNT(*) FROM daily_analysis WHERE date = ? AND close > 0", (max_date,)).fetchone()[0]
+        stage2_cnt = conn.execute("""
+            SELECT COUNT(*) FROM daily_analysis 
+            WHERE date = ? AND close > sma_50 AND sma_50 > sma_200 AND sma_200 > 0
+        """, (max_date,)).fetchone()[0]
+        stage2_ratio = round((stage2_cnt / total_cnt * 100), 1) if total_cnt > 0 else 0
+
+        # 4. 활성 주도주 수 (오늘의 trade_plan 종목 수)
+        plan_date = conn.execute("SELECT MAX(date) FROM trade_plan").fetchone()[0]
+        active_leaders = conn.execute("SELECT COUNT(*) FROM trade_plan WHERE date = ?", (plan_date,)).fetchone()[0] if plan_date else 0
+
+        # 5. 주도 섹터 (가장 많이 포착된 테마)
+        top_sector = "N/A"
+        if plan_date:
+            sector_res = conn.execute("""
+                SELECT category_name, COUNT(*) as cnt 
+                FROM trade_plan t
+                JOIN sectors_themes s ON t.code = s.code
+                WHERE t.date = ?
+                GROUP BY category_name
+                ORDER BY cnt DESC LIMIT 1
+            """, (plan_date,)).fetchone()
+            if sector_res: top_sector = sector_res[0]
+
+        # 6. 리스크 레벨 산출 (Stage 2 비율 기준)
+        if stage2_ratio > 40: risk_level = "SAFE"
+        elif stage2_ratio > 20: risk_level = "NORMAL"
+        else: risk_level = "CAUTION"
+
         conn.close()
-        return { "stage2Ratio": 30.2, "activeLeaders": 15, "marketRS": res[0] if res else 0, "topSector": "AI / 로봇 / 인프라", "riskLevel": "NORMAL", "lastSync": max_date }
-    except: return {"error": "fail"}
+        return {
+            "stage2Ratio": stage2_ratio,
+            "activeLeaders": active_leaders,
+            "marketRS": market_rs,
+            "topSector": top_sector,
+            "riskLevel": risk_level,
+            "lastSync": max_date
+        }
+    except Exception as e:
+        print(f"Summary Error: {e}")
+        return {"error": str(e)}
 
 @router.get("/stocks")
 def get_stock_analysis(date: str = None):
@@ -158,8 +212,7 @@ def get_stock_analysis(date: str = None):
 
             # 트랙 표준화 (프론트엔드 App.tsx 필터와 100% 매칭)
             raw_track = str(row['track']).upper()
-            if 'TRACK1_STRICT' in raw_track: display_track = 'TRACK1'
-            elif 'TRACK1_RELAXED' in raw_track: display_track = 'TRACK_RELAXED'
+            if 'TRACK1' in raw_track: display_track = 'TRACK1'
             elif 'TRACK_EX' in raw_track: display_track = 'TRACK_EX'
             elif 'TRACK2' in raw_track: display_track = 'TRACK2'
             else: display_track = raw_track
@@ -187,7 +240,7 @@ def get_stock_analysis(date: str = None):
 def get_stock_history(code: str):
     try:
         conn = get_connection()
-        query = "SELECT date, close, sma_20, sma_50, sma_150, sma_200 FROM daily_analysis WHERE code = ? ORDER BY date DESC LIMIT 200"
+        query = "SELECT date, open, close, volume, volume_sma_50, sma_20, sma_50, sma_150, sma_200 FROM daily_analysis WHERE code = ? ORDER BY date DESC LIMIT 200"
         df = pd.read_sql_query(query, conn, params=(code,))
         conn.close()
         if df.empty: return []

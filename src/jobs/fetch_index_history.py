@@ -13,7 +13,7 @@ def fetch_index_chart(code, start_date, end_date):
     all_data = []
     current_end = end_date
     
-    for i in range(4):  # 최대 400일치 (1회당 100개)
+    for i in range(10):  # 최대 1000일치 (1회당 100개)
         params = {
             "FID_COND_MRKT_DIV_CODE": "U",
             "FID_INPUT_ISCD": code,
@@ -35,6 +35,9 @@ def fetch_index_chart(code, start_date, end_date):
             
         # 다음 호출을 위해 종료일 조정 (마지막 날짜 - 1일)
         last_date_str = chunk[-1]["stck_bsop_date"]
+        # API 응답의 마지막 날짜가 동일하면 무한 루프 방지
+        if last_date_str == current_end:
+            break
         current_end = (datetime.strptime(last_date_str, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
         if current_end < start_date:
             break

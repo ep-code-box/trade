@@ -29,14 +29,16 @@ The system consists of a robust **Python Backend Analysis Engine** and a modern 
 
 ## 3. Investment Strategy: The 3-Track System
 
-### TRACK 1: Trend Following (Aggressive Growth) - [v5.5 Final]
-1.  **Market Slope**: Index > SMA(200) AND SMA(200) Slope > 0 (Upward trend compared to 1 month ago).
-2.  **Survival Filter**: Price >= Calculated Stop-Loss (Shield). Immediate drop if breached.
-3.  **P-VCP (Price Tightness)**: 
-    -   **Strict**: 5-day average price range <= 4%.
-    -   **Relaxed**: 5-day average price range <= 6% (Top 3 RS only).
-    -   **Trend**: Current volatility must be tighter than the previous 5 days.
-4.  **VDU (Volume Dry-up)**: Current Volume < 50-day average Volume * 0.8.
+### TRACK 1: Trend Following (Aggressive Growth) - [v22.0 Dual-Track]
+1.  **Market Slope**: Index > SMA(21) AND Index SMA(21) Slope > 0.
+2.  **Survival Filter**: Price >= Calculated Stop-Loss (Shield). Shield = Max(Entry * 0.93, SMA(21)).
+3.  **Double RS Principle**: Both Trend RS and Master RS MUST be >= 80.
+4.  **RIP (Breakout)**: 
+    *   Target: Near 52-week High (within 5% for general, 10% for RS 96+).
+    *   Tightness: VCP <= 4% (Strict) or 6% (Relaxed for Elite).
+5.  **DIP (Pullback)**:
+    *   Target: Near Institutional Life-line (SMA 21). Low <= SMA(21) * 1.02 AND Close >= SMA(21) * 0.98.
+    *   Evidence: VDU (Volume < 50-day Avg * 0.8) OR Candle Patterns (Hammer, Engulfing).
 
 ### TRACK 2: Dividend Magic Formula (Value & Yield) - [v6.4 Final]
 1.  **Live Yield Audit**: (Recorded DPS / Today's Price) * 100 within **3.0% ~ 12.0%**.
@@ -82,7 +84,7 @@ The system consists of a robust **Python Backend Analysis Engine** and a modern 
 ## 6. Development Constitution (Efficiency & Cleanliness)
 
 ### A. Modular Architecture
-- **Strict Line Limit**: No single source file shall exceed **200-300 lines**. If logic expands beyond this threshold, it MUST be refactored into smaller, specialized modules.
+- **Strict Line Limit**: No single source file shall exceed **200 lines**. If logic expands beyond this threshold, it MUST be refactored into smaller, specialized modules (Atomic Logic).
 - **Single Responsibility**: Each file must serve one clear purpose, adhering to the "Atomic Logic" principle.
 
 ### B. Logical Isolation
@@ -113,10 +115,12 @@ The system consists of a robust **Python Backend Analysis Engine** and a modern 
 - **Verification Loop**: Once full data processing is complete, the results MUST be verified by performing direct SQL queries against the local database (`stock_info.db`).
 - **Integrity Check**: Confirm that fields are correctly populated, data types are preserved, and no corruption occurred during the batch process.
 
-### D. Tailscale & Local Serving (Operational)
+### D. Python Environment & Operational Serving
+- **Python Version**: All backend logic MUST run on **Python 3.11**.
+- **Virtual Environment**: Use the local virtual environment located at **`./venv/bin/python3`**. NEVER use system Python for execution.
 - **Port Strategy**: **7777** port is used for unified UI and API serving.
 - **External Access**: Accessible via Tailscale IP (`100.97.140.71:7777`).
-- **Unified Restart**: Use the `./restart.sh` script in the parent directory for system control.
+- **Unified Restart**: Use the `./restart.sh` script in the parent directory for system control. It is configured to use the correct `venv` path.
     - `./restart.sh trade`: Restart TrendHunter only.
     - `./restart.sh trade build`: Restart TrendHunter after building frontend.
     - `./restart.sh all`: Restart all services (including Mansoorrr).

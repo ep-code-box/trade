@@ -29,7 +29,7 @@ class AsyncRateLimiter:
                 sleep_time = 1.001 - (now - self.calls[0])
             if sleep_time > 0: await asyncio.sleep(sleep_time)
 
-ASYNC_LIMITER = AsyncRateLimiter(max_per_second=30.0)
+ASYNC_LIMITER = AsyncRateLimiter(max_per_second=15.0)
 
 def get_headers(tr_id: str, custtype: str = "P"):
     token = get_access_token()
@@ -92,14 +92,19 @@ async def register_reserved_order(symbol: str, side: str, price: int, qty: int =
     return await kis_post_async("/uapi/domestic-stock/v1/trading/order-resv", body=body, tr_id="CTSC0008U", use_real=True)
 
 async def kis_get_async(path: str, params: dict = None, tr_id: str = "", custtype: str = "P", use_real: bool = False):
+    await ASYNC_LIMITER.wait()
     base = REAL_BASE_URL if use_real else BASE_URL
     url = f"{base}{path}"
     headers = get_headers(tr_id or "FHKST03010100", custtype=custtype)
     def _fetch():
         try:
             res = session.get(url, headers=headers, params=params or {}, timeout=10)
+            if res.status_code != 200:
+                print(f"   [KIS GET ERROR] {tr_id} STATUS: {res.status_code} RES: {res.text[:100]}")
             return res.json() if res.status_code == 200 else None
-        except: return None
+        except Exception as e:
+            print(f"   [KIS GET ERROR] {tr_id} EXCEPTION: {e}")
+            return None
     return await asyncio.to_thread(_fetch)
 
 async def kis_get_raw_async(path: str, params: dict = None, tr_id: str = "", custtype: str = "P", use_real: bool = False):
@@ -122,16 +127,20 @@ def kis_get_raw(path: str, params: dict = None, tr_id: str = "", custtype: str =
         return res.json() if res.status_code == 200 else None
     except: return None
 
-async def place_order_cash(symbol: str, qty: int, price: int = 0, side: str = "BUY", cano: str = None):
+async def place_order_cash(symbol: str, qty: int, price: int = 0, side: str = "BUY", cano: str = None, ord_dvsn: str = "01"):
     from src.auth import MODE, load_config_from_db
     config = load_config_from_db()
     raw_cano = cano or config.get("KIS_CANO", "")
     clean_cano = raw_cano.replace("-", "")
     cano_8, prdt_cd = clean_cano[:8], clean_cano[8:10] if len(clean_cano) >= 10 else "01"
     tr_id = ("TTTC0012U" if side == "BUY" else "TTTC0011U") if MODE == "real" else ("VTTC0012U" if side == "BUY" else "VTTC0011U")
+    
+    # 01(시장가), 03(시간외종가) 등은 가격을 0으로 설정해야 함
+    unpr = str(int(price)) if ord_dvsn == "00" and price > 0 else "0"
+    
     body = {
         "CANO": cano_8, "ACNT_PRDT_CD": prdt_cd, "PDNO": symbol,
-        "ORD_DVSN": "01", "ORD_QTY": str(qty), "ORD_UNPR": str(price) if price > 0 else "0"
+        "ORD_DVSN": ord_dvsn, "ORD_QTY": str(int(qty)), "ORD_UNPR": unpr
     }
     return await kis_post_async("/uapi/domestic-stock/v1/trading/order-cash", body=body, tr_id=tr_id, use_real=(MODE == "real"))
 

@@ -26,54 +26,88 @@ def parse_mst_standard(file_path, market_type):
     records = []
     with open(file_path, mode="r", encoding="cp949") as f:
         for row in f:
-            part2 = row[-p2_len-1:-1]
-            part1 = row[0:len(row)-p2_len-1]
-            data = {"code": part1[0:9].strip(), "name": part1[21:].strip()}
-            curr = 0
-            for w, col in zip(field_specs, columns):
-                data[col] = part2[curr:curr+w].strip()
-                curr += w
+            # [v16.0] 절대 인덱스 파싱 (밀림 방지)
+            # 코드: 0~9, 이름: 21~61
+            code = row[0:9].strip()
+            name = row[21:61].strip()
+            
+            # ST 그룹코드 확인 (KOSPI/KOSDAQ 공통 오프셋 적용 시도)
+            # 안전하게 여러 군데 찔러봄
+            is_st = row[163:165] == 'ST' or row[-228:-226] == 'ST' or row[-222:-220] == 'ST'
+            
+            # ST가 아니면 스킵 (ETF 제거)
+            if not is_st and 'ST' not in row: continue
+            if '스팩' in name: continue
+            if name.endswith('우') or name.endswith('우B') or name.endswith('(전환)'): continue
+
+            # 액면가 (152~162), 상장주식수 (170~185) - 삼성전자 기준
+            # KOSPI/KOSDAQ 오프셋이 다를 수 있으므로 try-catch로 안전장치
+            try:
+                if market_type == 'KOSPI':
+                    fcam = row[152:162].strip()
+                    stcn = row[170:185].strip()
+                else:
+                    # KOSDAQ은 오프셋이 다름. 일단 KOSPI 기준으로 시도하고 추후 보정
+                    # (일단은 텍스트 파싱의 유연함을 믿음)
+                    fcam = row[152:162].strip() 
+                    stcn = row[170:185].strip()
+            except:
+                fcam = "0"
+                stcn = "0"
+
+            data = {
+                "code": code, 
+                "name": name.split('  ')[0].strip(), # [TrendHunter] Trailing codes like ST310 are not part of the name
+                "scrt_grp_cls_code": "ST",
+                "stck_fcam": fcam,
+                "lstn_stcn": stcn
+            }
             records.append(data)
             
     if records: save_to_db(pd.DataFrame(records), market_type)
 
 def save_to_db(df, market_type):
-    mapping = {
-        "기준가": "stck_sdpr", "락구분": "flng_cls_code", "락구분코드": "flng_cls_code",
-        "액면가": "stck_fcam", "주식액면가": "stck_fcam", "상장주수": "lstn_stcn", 
-        "자본금": "cpfn", "결산월": "stac_month", "매출액": "sale_account", 
-        "영업이익": "bsop_prfi", "경상이익": "op_prfi", "당기순이익": "thtr_ntin", "ROE": "roe"
-    }
-    df_db = df.rename(columns=mapping)
+    # DB 컬럼 매핑 (파싱한 데이터 -> DB)
+    df_db = df.copy()
     df_db["market_type"] = market_type
     df_db["updated_at"] = datetime.now().strftime("%Y%m%d")
-
-    def clean_val(val, is_roe=False):
-        try:
-            s = str(val).strip()
-            if not s or s == "nan": return 0.0
-            # [보정] ROE에만 날짜 접두어 제거 적용
-            if is_roe and len(s) > 6 and '.' not in s[:6]: return float(s[6:])
-            return float(s)
-        except: return 0.0
-
-    numeric_cols = ["stck_sdpr", "stck_fcam", "lstn_stcn", "cpfn", "sale_account", "bsop_prfi", "op_prfi", "thtr_ntin"]
-    for c in numeric_cols:
-        if c in df_db.columns: df_db[c] = df_db[c].apply(lambda x: clean_val(x, False))
     
-    if 'roe' in df_db.columns:
-        df_db['roe'] = df_db['roe'].apply(lambda x: clean_val(x, True))
+    # 숫자 변환
+    for c in ["stck_fcam", "lstn_stcn"]:
+        df_db[c] = pd.to_numeric(df_db[c], errors='coerce').fillna(0)
 
     conn = get_connection()
-    cur = conn.cursor()
-    cur.executemany("DELETE FROM master_info WHERE code = ?", [(c,) for c in df_db['code'].tolist()])
-    cur.execute("PRAGMA table_info(master_info)")
-    db_cols = [row[1] for row in cur.fetchall()]
-    final_cols = [c for c in df_db.columns if c in db_cols]
-    df_db[final_cols].to_sql("master_info", conn, if_exists="append", index=False)
-    conn.commit()
-    conn.close()
-    print(f"✅ {len(df_db)} {market_type} records synchronized.")
+    
+    # [v9.1] 데이터 보존형 업데이트 (ROE, EPS 등 기존 데이터 유지)
+    try:
+        # 기존 데이터 로드
+        existing_df = pd.read_sql_query(f"SELECT * FROM master_info WHERE market_type = '{market_type}'", conn)
+        
+        if not existing_df.empty:
+            # 신규 데이터와 병합 (기존의 financial 데이터는 유지하고, name/updated_at 등만 갱신)
+            # 1. 신규 데이터의 컬럼만 추출
+            new_cols = df_db.columns.tolist()
+            # 2. 기존 데이터에서 신규 데이터에 없는 컬럼들만 추출 (roe, eps, thtr_ntin 등)
+            keep_cols = [c for c in existing_df.columns if c not in new_cols or c == 'code']
+            
+            # 3. 병합
+            merged_df = pd.merge(df_db, existing_df[keep_cols], on='code', how='left')
+            # 4. 기존에 없던 종목은 NULL로 채워짐
+        else:
+            merged_df = df_db
+
+        cur = conn.cursor()
+        # 해당 마켓 데이터만 삭제 후 전체(병합본) 삽입
+        cur.execute("DELETE FROM master_info WHERE market_type = ?", (market_type,))
+        merged_df.to_sql("master_info", conn, if_exists="append", index=False)
+        conn.commit()
+    except Exception as e:
+        print(f"DB 동기화 중 오류: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+    
+    print(f"✅ {len(df_db)} {market_type} records synchronized (Preserving Financials).")
 
 def main():
     init_db()

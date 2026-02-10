@@ -1,5 +1,5 @@
 import sqlite3
-from src.db import STOCK_DB_PATH
+from src.config import STOCK_DB_PATH
 
 def create_views():
     conn = sqlite3.connect(STOCK_DB_PATH)

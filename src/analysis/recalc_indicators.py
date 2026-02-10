@@ -17,6 +17,7 @@ def recalc_all():
     
     # 1. 이동평균선 (SMA)
     df['sma_20'] = group['close'].transform(lambda x: x.rolling(window=20).mean())
+    df['sma_21'] = group['close'].transform(lambda x: x.rolling(window=21).mean())
     df['sma_50'] = group['close'].transform(lambda x: x.rolling(window=50).mean())
     df['sma_150'] = group['close'].transform(lambda x: x.rolling(window=150).mean())
     df['sma_200'] = group['close'].transform(lambda x: x.rolling(window=200).mean())

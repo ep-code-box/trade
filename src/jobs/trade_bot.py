@@ -48,13 +48,25 @@ class TradeBot:
     async def execute_order(self, symbol, side="BUY", qty=1):
         if SAFETY_MODE:
             print(f"⚠️ [SAFETY MODE] {side} 주문 차단됨: {symbol} x {qty}주")
-            return {"rt_cd": "0", "msg1": "SAFETY_MODE_ACTIVE"} # 성공으로 간주하여 알림 유도
+            return {"rt_cd": "0", "msg1": "SAFETY_MODE_ACTIVE"} 
+
+        now = datetime.now()
+        hm = now.hour * 100 + now.minute
+        
+        # 15:30~15:40 사이에는 장후 시간외 종가(03) 사용
+        ord_dvsn = "01"
+        if 1530 <= hm < 1540:
+            ord_dvsn = "03"
+        elif hm >= 1540:
+            # 15:40 이후에는 예약 주문으로 전환하는 것이 좋으나, 봇 특성상 15:35에 종료되므로 일단 03 유지 또는 에러 처리
+            ord_dvsn = "03"
 
         tr_id = "TTTC0802U" if MODE == "real" else "VTTC0802U"
         if side == "SELL": tr_id = "TTTC0801U" if MODE == "real" else "VTTC0801U"
+        
         body = {
             "CANO": self.cano, "ACNT_PRDT_CD": self.acnt_prdt_cd, "PDNO": symbol,
-            "ORD_DVSN": "01", "ORD_QTY": str(qty), "ORD_UNPR": "0"
+            "ORD_DVSN": ord_dvsn, "ORD_QTY": str(qty), "ORD_UNPR": "0"
         }
         return await kis_post_async("/uapi/domestic-stock/v1/trading/order-cash", body=body, tr_id=tr_id)
 
@@ -142,7 +154,8 @@ class TradeBot:
                 now = datetime.now()
                 if now.weekday() < 5:
                     current_min = now.hour * 100 + now.minute
-                    if 930 <= current_min <= 1530:
+                    # 15:35까지 감시하여 종가 확인 및 장후 시간외 처리 허용
+                    if 900 <= current_min <= 1535:
                         try: await self.monitor_and_trade()
                         except Exception as e: print(f"Error: {e}")
                 await asyncio.sleep(60)

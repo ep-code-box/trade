@@ -129,6 +129,7 @@ def init_db():
             
             -- [기술적 지표]
             sma_20 REAL,                    -- 20일 이동평균
+            sma_21 REAL,                    -- 21일 이동평균 (기관 생명선)
             sma_50 REAL,                    -- 50일 이동평균
             sma_150 REAL,                   -- 150일 이동평균
             sma_200 REAL,                   -- 200일 이동평균
@@ -136,6 +137,7 @@ def init_db():
             high_52w INTEGER,               -- 52주 신고가
             low_52w INTEGER,                -- 52주 신저가
             rs_score REAL,                  -- 상대강도 점수 (0~99)
+            rs_score_master REAL,           -- 마스터 상대강도 점수 (추가)
             vol_std_10d REAL,               -- 10일 변동성 표준편차
             vol_std_50d REAL,               -- 50일 변동성 표준편차
             
@@ -201,13 +203,18 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS trade_plan (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT,                      -- 계획 수립일 (YYYY-MM-DD)
+            date TEXT,                      -- 계획 수립일 (YYYYMMDD)
             code TEXT,                      -- 종목코드
             name TEXT,                      -- 종목명
             entry_price INTEGER,            -- 진입가
             stop_price INTEGER,             -- 손절가
             weight TEXT,                    -- 비중
             status TEXT DEFAULT 'READY',    -- 상태 (READY, BOUGHT, SOLD, CANCEL)
+            track TEXT,                     -- 트랙 (TRACK1_STRICT, TRACK2 등)
+            rs_score REAL,                  -- 상대강도 점수
+            rs_score_master REAL,           -- 마스터 상대강도 점수
+            vcp_ratio REAL,                 -- VCP 지표
+            rationale TEXT,                 -- 추천 사유 (VDU 등)
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)

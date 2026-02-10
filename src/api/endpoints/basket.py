@@ -4,7 +4,7 @@ import os
 import pandas as pd
 from datetime import datetime
 from src.db import get_connection
-from src.kis_api import register_auto_order, register_reserved_order, place_stop_order
+from src.kis_api import register_auto_order, register_reserved_order, place_stop_order, place_order_cash
 from src.account import get_account_balance
 from src.auth import load_config_from_db
 from src.analysis.screen_market import get_tick_size, adjust_to_tick, get_breakout_price
@@ -174,25 +174,40 @@ async def place_buy_order(req: dict):
         balance = get_account_balance()
         qty = max(1, int((balance['summary']['total_asset'] * 0.1) / entry_price))
         
-        # [TrendHunter Policy] 1. 장 중(09:00~15:30): 스탑(Breakout) 주문 사용 / 2. 장 외: 예약(Reserved) 주문 사용
+        # [TrendHunter v14.5] 정밀 시간대별 주문 필터링
         now = datetime.now()
-        is_market_open = (now.hour > 9 or (now.hour == 9 and now.minute >= 0)) and (now.hour < 15 or (now.hour == 15 and now.minute <= 30))
-        if now.weekday() >= 5: is_market_open = False
+        hm = now.hour * 100 + now.minute
+        is_weekend = now.weekday() >= 5
+        
+        mode_name = ""
+        res = None
 
-        if is_market_open:
-            # 1단계: 매수 스탑 등록
+        if is_weekend:
+            # 주말에는 KIS 예약을 걸지 않음 (돌파 매매 함정 방지)
+            return {"status": "success", "message": f"{name} {entry_price}원 돌파 매수 대기 완료! 월요일 아침 장 개시 후 자동 감시가 시작됩니다."}
+        elif hm < 900:
+            # 장전에도 봇이 처리하도록 대기
+            return {"status": "success", "message": f"{name} {entry_price}원 돌파 매수 대기 완료! 09:00 장 개시 후 자동 감시가 시작됩니다."}
+        elif 900 <= hm < 1520:
+            # 정규장: 스탑(Breakout) 주문 (기존과 동일)
             res_buy = await place_stop_order(symbol, qty=qty, stop_price=entry_price, side="BUY", cano=cano)
             if res_buy and res_buy.get('rt_cd') == '0':
-                # 2단계: 성공 시 매도(손절) 스탑도 서버에 즉시 등록 (동시 감시)
                 if stop_price > 0:
                     await place_stop_order(symbol, qty=qty, stop_price=stop_price, side="SELL", cano=cano)
                 return {"status": "success", "message": f"{name} {entry_price}원 돌파 매수 & {stop_price}원 손절 감시 등록 완료!"}
             res = res_buy
             mode_name = "실시간 감시"
+        elif 1520 <= hm < 1530:
+            res = await place_order_cash(symbol, qty=qty, side="BUY", cano=cano, ord_dvsn="01")
+            mode_name = "장마감 동시호가(시장가)"
+        elif 1530 <= hm < 1540:
+            res = await place_order_cash(symbol, qty=qty, side="BUY", cano=cano, ord_dvsn="03")
+            mode_name = "장후 시간외(종가)"
+        elif 1540 <= hm < 1610:
+            return {"status": "error", "message": "15:40~16:10은 KIS 서버 정산 시간으로 주문이 불가능합니다. 16:10 이후에 시도해주세요."}
         else:
-            # 장 외 시간일 경우 예약 주문으로 등록
-            res = await register_reserved_order(symbol, side="BUY", price=entry_price, qty=qty, cano=cano)
-            mode_name = "예약"
+            # 야간에도 KIS 예약을 걸지 않고 봇에게 맡김
+            return {"status": "success", "message": f"{name} {entry_price}원 돌파 매수 대기 완료! 내일 아침 장 개시 후 자동 감시가 시작됩니다."}
         
         if res and res.get('rt_cd') == '0':
             return {"status": "success", "message": f"{name} {entry_price}원 {mode_name} 등록 완료! (조건 도달 시 자동 매수)"}

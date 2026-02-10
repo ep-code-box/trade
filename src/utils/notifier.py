@@ -1,7 +1,7 @@
 """텔레그렘 알림 엔진: 실시간 매매 알림 및 리포트 전송."""
 import os
-import asyncio
-from telegram import Bot
+import requests
+import threading
 from dotenv import load_dotenv
 from src.config import ROOT
 
@@ -13,33 +13,33 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 class TelegramNotifier:
     def __init__(self):
-        self.bot = Bot(token=TOKEN) if TOKEN else None
+        self.token = TOKEN
         self.chat_id = CHAT_ID
 
-    async def send_message_async(self, text: str):
-        """비동기 메시지 전송."""
-        if not self.bot or not self.chat_id:
-            # print("[Telegram] 설정 미비로 메시지를 전송하지 않음.")
+    def _send_actual(self, text: str):
+        """실제 HTTP 요청을 수행하는 내부 함수."""
+        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+        payload = {"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"}
+        try:
+            resp = requests.post(url, json=payload, timeout=10)
+            if not resp.ok:
+                print(f"[Telegram] 전송 실패: {resp.text}")
+        except Exception as e:
+            print(f"[Telegram] 네트워크 오류: {e}")
+
+    def send_message(self, text: str, sync: bool = False):
+        """메시지를 전송합니다. sync=True인 경우 전송 완료까지 대기합니다."""
+        if not self.token or not self.chat_id:
+            print("[Telegram] 토큰 혹은 채팅 ID가 설정되지 않았습니다.")
             return
         
-        try:
-            # [v20+] 버전은 비동기 메서드를 사용합니다.
-            await self.bot.send_message(chat_id=self.chat_id, text=text, parse_mode="HTML")
-        except Exception as e:
-            print(f"[Telegram] 전송 실패: {e}")
-
-    def send_message(self, text: str):
-        """동기 호출용 래퍼."""
-        if not TOKEN or not CHAT_ID: return
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(self.send_message_async(text))
-            else:
-                loop.run_until_complete(self.send_message_async(text))
-        except:
-            # 이벤트 루프가 없는 경우 (새로 생성)
-            asyncio.run(self.send_message_async(text))
+        if sync:
+            self._send_actual(text)
+        else:
+            # 별도의 스레드를 생성하여 즉시 실행 (메인 흐름 방해 금지)
+            thread = threading.Thread(target=self._send_actual, args=(text,))
+            thread.daemon = True 
+            thread.start()
 
 # 싱글톤 인스턴스
 notifier = TelegramNotifier()

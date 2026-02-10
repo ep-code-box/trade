@@ -5,8 +5,14 @@ from src.analysis.screen_market import get_tick_size, adjust_to_tick, get_breako
 
 def diagnose():
     conn = get_connection()
-    res = conn.execute("SELECT MAX(date) FROM daily_analysis").fetchone()
-    max_date = res[0]
+    # [v1.1] 데이터가 100개 이상인 최신 날짜를 찾음
+    query_max_date = "SELECT date FROM daily_analysis GROUP BY date HAVING COUNT(*) > 100 ORDER BY date DESC LIMIT 1"
+    res_date = conn.execute(query_max_date).fetchone()
+    if not res_date:
+        print("🚨 진단할 데이터가 없습니다.")
+        conn.close()
+        return
+    max_date = res_date[0]
     print(f"Diagnosis Date: {max_date}")
     
     # 1. Base Pool (Amount > 3B)

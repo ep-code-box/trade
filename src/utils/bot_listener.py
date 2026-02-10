@@ -85,10 +85,20 @@ async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"로그 조회 실패: {e}")
 
 async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/update: 데이터 파이프라인 즉시 실행 (정석 구현)."""
+    """/update: 데이터 파이프라인 즉시 실행 (중복 방지 락 추가)."""
     logger.info(">>> /update 명령어 수신됨")
     
-    await update.message.reply_text("🔄 <b>데이터 동기화 및 RS 분석을 시작합니다.</b>\n(완료 시 리포트가 자동 전송됩니다.)", parse_mode="HTML")
+    # [v16.1] 중복 실행 방지: 현재 run_daily.py가 실행 중인지 확인
+    try:
+        check_proc = subprocess.check_output(["pgrep", "-f", "run_daily.py"])
+        if check_proc:
+            await update.message.reply_text("⚠️ <b>이미 데이터 업데이트가 진행 중입니다.</b>\n잠시 후 /log 명령어로 상태를 확인하세요.", parse_mode="HTML")
+            return
+    except subprocess.CalledProcessError:
+        # pgrep이 에러를 뱉으면 실행 중인 프로세스가 없다는 뜻이므로 통과
+        pass
+
+    await update.message.reply_text("🔄 <b>데이터 동기화 파이프라인 가동!</b>\n지수->시세->수급->RS분석 순으로 진행됩니다.", parse_mode="HTML")
     
     # 실행 환경 구축
     script_path = os.path.join(ROOT, "run_daily.py")

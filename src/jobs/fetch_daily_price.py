@@ -12,13 +12,18 @@ api_call_count = 0
 
 async def fetch_single_stock_async(code, name, last_date, today_str):
     global api_call_count
-    # [최적화] 초기 적재 시 300일(3회), 평소 100일(1회)
-    max_calls = 3 if pd.isna(last_date) else 1
+    # [최적화] 지수는 항상 1000일(10회), 종목은 초기 300일/평소 100일
+    is_index = code in ["0001", "1001"]
     
-    start_dt = (datetime.now() - timedelta(days=400)).strftime("%Y%m%d") if pd.isna(last_date) else \
-               (datetime.strptime(str(last_date), "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
+    if is_index:
+        max_calls = 10
+        start_dt = (datetime.now() - timedelta(days=1500)).strftime("%Y%m%d")
+    else:
+        max_calls = 3 if pd.isna(last_date) else 1
+        start_dt = (datetime.now() - timedelta(days=400)).strftime("%Y%m%d") if pd.isna(last_date) else \
+                   (datetime.strptime(str(last_date), "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
     
-    if start_dt > today_str: return None, None
+    if not is_index and start_dt > today_str: return None, None
 
     path, mrkt_div, tr_id = ("/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice", "U", "FHKUP03500100") if len(code) == 4 else ("/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice", "J", "FHKST03010100")
 
@@ -94,11 +99,14 @@ async def main_async():
     
     start_time = time.time()
     completed, batch = 0, []
-    # 150개를 동시에 네트워크에 태움
-    sem = asyncio.Semaphore(150)
+    # [Stability] 30개로 동시성 제한 (KIS API 안정성 확보)
+    sem = asyncio.Semaphore(30)
     
     async def task(r):
-        async with sem: return await fetch_single_stock_async(r['code'], r['name'], r['last_date'], today_str)
+        async with sem:
+            res = await fetch_single_stock_async(r['code'], r['name'], r['last_date'], today_str)
+            await asyncio.sleep(0.05) # 미세한 간격 추가
+            return res
 
     futures = [asyncio.create_task(task(r)) for _, r in target_stocks.iterrows()]
     

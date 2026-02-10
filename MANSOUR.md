@@ -1,21 +1,23 @@
-# 🧠 MANSOUR Engine (Local AI Architecture)
+# 🧠 MANSOUR Engine (Hybrid AI Architecture)
 
 ## 1. Overview
-**Mansour(만수르)**는 TrendHunter의 핵심 두뇌 역할을 하는 로컬 LLM 서비스 엔진입니다. Apple Silicon의 GPU를 활용하는 MLX 프레임워크를 기반으로 하며, 독립적인 상주 프로세스로 운영됩니다.
+**Mansour(만수르)**는 TrendHunter의 통합 AI 전략 엔진입니다. 
+2026년 현재 **Google Gemini 3 Flash**를 주력 분석기로 사용하며, 시스템 리소스 및 할당량 문제 발생 시 **로컬 MLX 모델 (Llama-3.1-8B)**로 자동 전환될 수 있는 하이브리드 구조를 지향합니다.
 
-## 2. Core Rules (Mandatory)
-1.  **독립 운영**: AI 엔진은 반드시 `Port 11434`에서 별도 프로세스로 가동되어야 한다.
-2.  **모델 사양**: 기본 모델은 `mlx-community/Phi-3.5-mini-instruct-4bit`를 사용한다. (3.8B 파라미터로 논리력과 속도의 균형 최적화)
-3.  **상태 보존**: 백엔드 API 서버(`Port 7777`)를 재기동하더라도 AI 엔진 프로세스는 종료하지 않는다.
-4.  **분석 프로토콜**:
-    *   모든 분석 요청은 `src/utils/mlx_llm.py` 클라이언트를 통해서 수행한다.
-    *   분석 데이터 전달 시 반드시 `JSON` 직렬화를 사용하며, 수치 데이터 누락을 금지한다.
+## 2. Analytical Philosophy (Core Rules)
+모든 AI 분석은 다음의 **'사자의 눈'** 원칙을 반드시 준수해야 합니다:
+1.  **구조 우선 (Structure First)**: 단순 가격이 아닌 VCP(변동성 수축)와 이평선 정배열(Stage 2)을 분석의 핵심 근거로 삼는다.
+2.  **데이터 증거 (Market Evidence)**: RS Score, 조정 깊이, 거래량 마름(VDU) 수치를 반드시 인용한다.
+3.  **사냥꾼의 결론**: 모호한 조언을 배제하고 `BUY(진입)`, `READY(매복)`, `SKIP(제외)` 중 하나를 단호하게 판결한다.
 
-## 3. Operational Scripts
-*   `restart_llm.sh`: AI 모델 서버만 단독 재기동 (메모리 리프레시 필요 시).
-*   `restart_trade.sh`: 트레이딩 백엔드/프론트엔드만 재기동 (코드 수정 시).
-*   `restart_all.sh`: 전체 시스템 통합 지능형 기동 (모델 서버 상태 체크 후 기동).
+## 3. Operational Flow
+1.  **Trigger**: 사용자가 대시보드에서 [AI 분석] 버튼 클릭.
+2.  **Execution**: 
+    - 백엔드에서 Google Gemini 3 Flash API 호출 및 결과 생성.
+    - 결과 생성 즉시 **텔레그램 봇**을 통해 사용자에게 리포트 전송.
+3.  **Fallback**: 클라우드 API 실패 시 로컬 상주 서버(`Port 11434`)를 통해 분석 수행.
 
-## 4. Troubleshooting
-*   **Response Timeout**: 모델 로딩 중일 가능성이 높음. `llm_server.log`를 확인하여 `Application startup complete` 메시지를 확인한다.
-*   **Import Error**: `mlx-lm` 패키지가 설치된 Python 환경(`/usr/bin/python3`)에서 실행 중인지 확인한다.
+## 4. Maintenance
+- **API Key**: `system_config` 테이블의 `th_ai_config`에서 관리.
+- **Local Server**: `restart_llm.sh` (상위 폴더 관리)를 통해 Llama-3.1-8B 상주 기동.
+- **Frontend Sync**: `geminiService.ts`에서 백엔드 API(`/api/stocks/.../ai-analysis`) 호출.
