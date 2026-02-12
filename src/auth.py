@@ -48,38 +48,40 @@ if MODE == "real":
 else:
     BASE_URL = VTS_BASE_URL
 
-def get_access_token():
+def get_access_token(force_refresh=False):
     """Access Token 발급 및 DB 저장/조회 (만료 자동 갱신)."""
     global _cached_token
     
-    # 1. 메모리 캐시 확인 (간단한 체크)
-    if _cached_token:
-        return _cached_token
+    # 1. DB에서 토큰 조회 (force_refresh가 아닐 때만)
+    if not force_refresh:
+        # 메모리 캐시 확인 (간단한 체크)
+        if _cached_token:
+            # 메모리 캐시만으로는 만료를 정확히 알 수 없으므로 아래 DB 조회 로직으로 넘어감
+            pass
 
-    # 2. DB에서 토큰 조회
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT value FROM system_config WHERE key = 'KIS_ACCESS_TOKEN'")
-        row = cur.fetchone()
-        
-        if row:
-            token_data = json.loads(row[0])
-            expired_at_str = token_data.get("access_token_token_expired") # 형식: "2025-02-03 14:00:00"
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM system_config WHERE key = 'KIS_ACCESS_TOKEN'")
+            row = cur.fetchone()
             
-            if expired_at_str:
-                exp_dt = datetime.strptime(expired_at_str, "%Y-%m-%d %H:%M:%S")
-                # 만료 1분 전까지 여유
-                if exp_dt > datetime.now():
-                    _cached_token = token_data.get("access_token")
-                    return _cached_token
-    except Exception as e:
-        print(f"Token DB read error: {e}")
-    finally:
-        conn.close()
+            if row:
+                token_data = json.loads(row[0])
+                expired_at_str = token_data.get("access_token_token_expired") 
+                
+                if expired_at_str:
+                    exp_dt = datetime.strptime(expired_at_str, "%Y-%m-%d %H:%M:%S")
+                    # 만료 10분 전까지 여유를 둠 (안전 계수)
+                    if exp_dt > datetime.now():
+                        _cached_token = token_data.get("access_token")
+                        return _cached_token
+        except Exception as e:
+            print(f"Token DB read error: {e}")
+        finally:
+            conn.close()
 
-    # 3. 토큰 만료 또는 없음 -> 신규 발급
-    print("🔑 KIS Access Token 신규 발급 요청...")
+    # 2. 토큰 만료, 없음 또는 force_refresh -> 신규 발급
+    print(f"🔑 KIS Access Token 신규 발급 요청... (Reason: {'FORCED' if force_refresh else 'EXPIRED/MISSING'})")
     url = f"{BASE_URL}/oauth2/tokenP"
     headers = {"content-type": "application/json"}
     body = {

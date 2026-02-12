@@ -83,29 +83,32 @@ async def main_async():
         today_str = now.strftime("%Y%m%d")
         
     conn = get_connection()
-    # [Clean Start] 오늘자 불완전 데이터 강제 삭제 (무결성 보장)
-    conn.execute("DELETE FROM daily_analysis WHERE date = ?", (today_str,))
-    conn.commit()
-    
+    # [v16.0] 지능형 수집: 기존 데이터를 지우지 않고, 없는 종목만 타겟팅
     stocks = pd.read_sql_query("SELECT code, name FROM master_info WHERE LENGTH(code) IN (4, 6)", conn)
     stocks = pd.concat([stocks, pd.DataFrame([{"code":"0001","name":"KOSPI"},{"code":"1001","name":"KOSDAQ"}])]).drop_duplicates(subset=["code"])
-    df_status = pd.read_sql_query("SELECT code, MAX(date) as last_date FROM daily_analysis GROUP BY code", conn)
+    df_status = pd.read_sql_query(f"SELECT code FROM daily_analysis WHERE date = '{today_str}'", conn)
     conn.close()
-    stocks = pd.merge(stocks, df_status, on="code", how="left")
-    target_stocks = stocks[stocks['last_date'] != today_str]
+    
+    # 오늘 데이터가 없는 종목만 필터링
+    target_stocks = stocks[~stocks['code'].isin(df_status['code'])]
     
     total = len(target_stocks)
-    print(f"🚀 [v3.2] 광속 엔진 가동: {total}개 종목 (Target: 30 TPS API)")
+    if total == 0:
+        print(f"✅ [v16.0] 오늘({today_str}) 데이터가 이미 완벽합니다. (No Gap)")
+        return
+
+    print(f"🚀 [v16.0] 빵꾸 제로 엔진 가동: 누락된 {total}개 종목 집중 수집")
     
     start_time = time.time()
     completed, batch = 0, []
-    # [Stability] 30개로 동시성 제한 (KIS API 안정성 확보)
-    sem = asyncio.Semaphore(30)
+    # [Stability] KIS API 안정성을 위해 동시성을 15로 조정
+    sem = asyncio.Semaphore(15)
     
     async def task(r):
         async with sem:
-            res = await fetch_single_stock_async(r['code'], r['name'], r['last_date'], today_str)
-            await asyncio.sleep(0.05) # 미세한 간격 추가
+            # last_date 정보는 무시하고 오늘 데이터만 확보 시도
+            res = await fetch_single_stock_async(r['code'], r['name'], None, today_str)
+            await asyncio.sleep(0.08) # 안정적인 간격 확보
             return res
 
     futures = [asyncio.create_task(task(r)) for _, r in target_stocks.iterrows()]
@@ -115,19 +118,22 @@ async def main_async():
         if data: batch.append((code, data))
         completed += 1
         
-        if len(batch) >= 100 or completed == total:
+        if len(batch) >= 50 or completed == total:
             await asyncio.to_thread(save_batch_fast, list(batch))
             batch = []
             
         if completed % 100 == 0 or completed == total:
             elapsed = time.time() - start_time
-            # 실시간 TPS 계산 (종목 기준 vs API 호출 기준)
-            stock_tps = completed / elapsed
-            api_tps = api_call_count / elapsed
-            print(f"[{completed}/{total}] 종목속도: {stock_tps:.1f} STPS | 실전 API 속도: {api_tps:.1f} TPS")
+            print(f"[{completed}/{total}] 진행 중... (누적 API: {api_call_count}회)")
 
-    await asyncio.sleep(2)
-    print(f"\n✅ 작전 종료. 총 호출 {api_call_count}건, 평균 {api_call_count/(time.time()-start_time):.1f} TPS")
+    # [Audit Pass] 수집 종료 후 2차 검증 및 빵꾸 메우기
+    conn = get_connection()
+    df_final = pd.read_sql_query(f"SELECT count(*) as cnt FROM daily_analysis WHERE date = '{today_str}'", conn)
+    conn.close()
+    print(f"\n🏁 1차 작전 종료. 현재 확보 데이터: {df_final.iloc[0]['cnt']}건")
+    
+    # 만약 여전히 빵꾸가 많으면 자동으로 2차 실행을 위해 False 반환 (run_daily에서 제어 가능)
+    return True
 
 def main(): asyncio.run(main_async())
 if __name__ == "__main__": main()

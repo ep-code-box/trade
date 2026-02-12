@@ -27,7 +27,7 @@ def get_latest_recommendations():
 
         # 2. 해당 날짜의 추천주 조회 (RS 내림차순)
         query = """
-            SELECT name, code, track, rs_score, entry_price, rationale
+            SELECT name, code, track, rs_score, entry_price, stop_price, rationale
             FROM trade_plan 
             WHERE date = ? AND status IN ('READY', 'WATCH')
             ORDER BY rs_score DESC
@@ -49,36 +49,28 @@ def send_recommendation_report():
         return
 
     # 메시지 구성
-    tg_msg = f"🚀 <b>TrendHunter 추천 브리핑 ({date})</b>
-"
-    tg_msg += f"────────────────
-"
+    tg_msg = f"🚀 <b>TrendHunter 추천 브리핑 ({date})</b>\n"
+    tg_msg += f"────────────────\n"
     
     track1_count = 0
     track2_count = 0
     
-    # 상위 5개만 상세 전송 (너무 길면 가독성 저하)
+    # 상위 10개 전송
     top_picks = rows[:10]
     
-    for name, code, track, rs, price, note in top_picks:
+    for name, code, track, rs, entry, shield, note in top_picks:
         icon = "💎" if "TRACK1" in track.upper() or "트랙 1" in track else "💰"
-        track_name = "Trend" if icon == "💎" else "Value"
         
-        tg_msg += f"<b>{icon} {name} ({code})</b>
-"
-        tg_msg += f" • RS: <b>{rs:.0f}</b> | 목표가: {price:,}원
-"
-        tg_msg += f" • 사유: {note}
-
-"
+        tg_msg += f"<b>{icon} {name} ({code})</b>\n"
+        tg_msg += f" • RS: <b>{rs:.0f}</b> | 🎯 <b>{entry:,}원</b>\n"
+        tg_msg += f" • 🛡️ <b>Shield: {shield:,}원</b>\n"
+        tg_msg += f" • 사유: {note}\n\n"
         
         if icon == "💎": track1_count += 1
         else: track2_count += 1
 
-    tg_msg += f"────────────────
-"
-    tg_msg += f"📊 <b>요약</b>: Trend {track1_count}종목 / Value {track2_count}종목
-"
+    tg_msg += f"────────────────\n"
+    tg_msg += f"📊 <b>요약</b>: Trend {track1_count}종목 / Value {track2_count}종목\n"
     tg_msg += f"💡 <i>전체 리스트는 대시보드를 확인하세요.</i>"
 
     # 전송

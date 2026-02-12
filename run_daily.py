@@ -53,20 +53,47 @@ def main():
     tg_start_msg = "⚙️ <b>[TrendHunter] 일일 데이터 파이프라인 가동 시작</b>"
     notifier.send_message(tg_start_msg)
 
+    # [v16.0] 지능형 파이프라인 가동
     for name, func in steps:
         print(f"\n[진행] {name}...")
         start = time.time()
-        try:
-            func()
-            elapsed = time.time() - start
-            print(f"   ✅ 완료 ({elapsed:.1f}초)")
-            # 텔레그램 간략 보고 (너무 시끄럽지 않게 요약해서)
-            # notifier.send_message(f"✅ {name} 완료 ({elapsed:.1f}s)")
-        except Exception as e:
-            error_msg = f"🚨 <b>[작전 실패] {name} 단계에서 오류 발생!</b>\n\n내용: <code>{str(e)}</code>"
-            print(f"   {error_msg}")
-            notifier.send_message(error_msg)
-            return # 실패 시 중단
+        
+        # 시세 업데이트 단계(2단계)는 특별 관리
+        if "오늘의 시세" in name:
+            max_retries = 3
+            for attempt in range(max_retries):
+                print(f"   (시도 {attempt+1}/{max_retries}) 시세 수집 중...")
+                try:
+                    func()
+                    # 수집 후 빵꾸 확인
+                    from src.db import get_connection
+                    import pandas as pd
+                    from datetime import datetime, timedelta
+                    now = datetime.now()
+                    target_dt = now.strftime("%Y%m%d") if now.hour >= 18 else (now - timedelta(days=1)).strftime("%Y%m%d")
+                    conn = get_connection()
+                    count = pd.read_sql_query(f"SELECT count(*) as cnt FROM daily_analysis WHERE date = '{target_dt}'", conn).iloc[0]['cnt']
+                    conn.close()
+                    
+                    if count > 2000:
+                        print(f"   ✅ 데이터 무결성 확보 ({count}건)")
+                        break
+                    else:
+                        print(f"   ⚠️ 데이터 부족 ({count}건). 재시도합니다...")
+                        time.sleep(5)
+                except Exception as e:
+                    print(f"   ❌ 오류: {e}")
+                    if attempt == max_retries - 1: raise e
+        else:
+            try:
+                func()
+                elapsed = time.time() - start
+                print(f"   ✅ 완료 ({elapsed:.1f}초)")
+            except Exception as e:
+                error_msg = f"🚨 <b>[작전 실패] {name} 단계에서 오류 발생!</b>\n\n내용: <code>{str(e)}</code>"
+                print(f"   {error_msg}")
+                notifier.send_message(error_msg)
+                return 
 
     print("\n" + "=" * 70)
     print(" [작전 결과 보고서]")
