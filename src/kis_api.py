@@ -110,6 +110,15 @@ async def kis_get_async(path: str, params: dict = None, tr_id: str = "", custtyp
 async def kis_get_raw_async(path: str, params: dict = None, tr_id: str = "", custtype: str = "P", use_real: bool = False):
     return await kis_get_async(path, params, tr_id, custtype, use_real)
 
+async def get_current_price_async(symbol: str):
+    """현재가 조회 (FHKST01010100)"""
+    res = await kis_get_raw_async("/uapi/domestic-stock/v1/quotations/inquire-price", 
+                                 params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
+                                 tr_id="FHKST01010100")
+    if res and res.get('rt_cd') == '0' and 'output' in res:
+        return int(res['output']['stck_prpr'])
+    return None
+
 def kis_get_raw(path: str, params: dict = None, tr_id: str = "", custtype: str = "P", use_real: bool = False):
     """동기 GET 호출 (봇 리스너 호환용)"""
     from src.auth import REAL_BASE_URL, BASE_URL, get_access_token, APP_KEY, APP_SECRET

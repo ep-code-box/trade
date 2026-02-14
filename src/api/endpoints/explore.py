@@ -37,20 +37,21 @@ def explore_market(
         if search:
             base_query += " AND (m.name LIKE ? OR d.code LIKE ?)"
             params.extend([f"%{search}%", f"%{search}%"])
-        if min_rs > 0:
-            base_query += " AND d.rs_score >= ?"; params.append(min_rs)
-        if min_amount > 0:
-            base_query += " AND d.amount >= ?"; params.append(min_amount * 1000000)
-        if max_disparity > 0:
-            base_query += " AND d.sma_200 > 0 AND d.close <= (d.sma_200 * ?)"; params.append(1 + max_disparity/100.0)
-        if strict_alignment:
-            base_query += " AND d.sma_20 > d.sma_50 AND d.sma_50 > d.sma_200"
-        if min_low_dist > 0:
-            base_query += " AND d.low_52w > 0 AND d.close >= (d.low_52w * ?)"; params.append(1 + min_low_dist/100.0)
-        if max_high_dist > 0:
-            base_query += " AND d.high_52w > 0 AND d.close >= (d.high_52w * ?)"; params.append(1 - max_high_dist/100.0)
-        if master_rules:
-            base_query += " AND d.sma_150 > d.sma_200 AND d.sma_200 > sma_200_prev AND d.volume < (d.volume_sma_50 * 0.8) AND ((m.bsop_prfi > 0 AND m.thtr_ntin > 0) OR (d.rs_score >= 90))"
+        else:
+            if min_rs > 0:
+                base_query += " AND d.rs_score >= ?"; params.append(min_rs)
+            if min_amount > 0:
+                base_query += " AND d.amount >= ?"; params.append(min_amount * 1000000)
+            if max_disparity > 0:
+                base_query += " AND d.sma_200 > 0 AND d.close <= (d.sma_200 * ?)"; params.append(1 + max_disparity/100.0)
+            if strict_alignment:
+                base_query += " AND d.sma_20 > d.sma_50 AND d.sma_50 > d.sma_200"
+            if min_low_dist > 0:
+                base_query += " AND d.low_52w > 0 AND d.close >= (d.low_52w * ?)"; params.append(1 + min_low_dist/100.0)
+            if max_high_dist > 0:
+                base_query += " AND d.high_52w > 0 AND d.close >= (d.high_52w * ?)"; params.append(1 - max_high_dist/100.0)
+            if master_rules:
+                base_query += " AND d.sma_150 > d.sma_200 AND d.sma_200 > sma_200_prev AND d.volume < (d.volume_sma_50 * 0.8) AND ((m.bsop_prfi > 0 AND m.thtr_ntin > 0) OR (d.rs_score >= 90))"
 
         count_query = f"SELECT COUNT(*) FROM ({base_query})"
         cursor = conn.cursor()

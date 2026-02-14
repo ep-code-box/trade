@@ -38,7 +38,7 @@ def calc_rs_scores_flexible():
         SELECT date, code, close, amount 
         FROM daily_analysis 
         WHERE date = '{max_date}'
-          AND (amount >= 1000000000 OR code IN ('0001', '1001'))
+          AND (amount >= 1000000000 OR code IN ('0001', '1001') OR code IN (SELECT symbol FROM account_positions_audit WHERE qty > 0))
     """
     valid_codes_df = pd.read_sql_query(query, conn)
     valid_codes = valid_codes_df['code'].tolist()

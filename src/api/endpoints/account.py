@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from src.auth import get_access_token, APP_KEY, APP_SECRET, BASE_URL, MODE, load_config_from_db
+from src.analysis.screen_market import adjust_to_tick
 
 router = APIRouter(tags=["account"])
 
@@ -198,11 +199,36 @@ async def get_account_summary():
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             
+            # [v16.1] 실시간 계좌 동기화: DB와 KIS 실잔고를 일치시킴
+            # 1. DB의 모든 종목 수량 0으로 초기화 (잔고에 없는 종목 제거용)
+            cur.execute("UPDATE account_positions_audit SET qty = 0")
+            
             for item in output1:
                 symbol = item.get('pdno')
                 qty = int(item.get('hldg_qty', 0) or 0)
                 if qty <= 0: continue
+                
+                avg_price = float(item.get('pchs_avg_pric', 0) or 0)
+                curr_price = int(item.get('prpr', 0) or 0)
 
+                # 2. DB에 존재여부 확인 및 업데이트
+                cur.execute("SELECT symbol, manual_shield, peak_price FROM account_positions_audit WHERE symbol = ?", (symbol,))
+                row = cur.fetchone()
+                if row:
+                    # 기존 종목 수량 및 고점 업데이트
+                    peak = max(row['peak_price'] or 0, curr_price)
+                    cur.execute("""
+                        UPDATE account_positions_audit 
+                        SET qty = ?, peak_price = ?, updated_at = datetime('now', 'localtime') 
+                        WHERE symbol = ?
+                    """, (qty, peak, symbol))
+                else:
+                    # 신규 종목 (트랙 외 또는 수동 매수) 진입
+                    cur.execute("""
+                        INSERT INTO account_positions_audit (symbol, entry_price, peak_price, qty, manual_shield, updated_at)
+                        VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+                    """, (symbol, avg_price, curr_price, qty, int(avg_price * 0.95)))
+                
                 sector, rs_score, manual_shield, highest_price = "기타", 50, None, 0
                 try:
                     # 1. 섹터 조회
@@ -215,14 +241,14 @@ async def get_account_summary():
                     row = cur.fetchone()
                     if row: rs_score = row['rs_score']
 
-                    # 3. Shield 및 최고가 조회 (봇이 업데이트한 트레일링 스탑 포함)
-                    cur.execute("SELECT manual_shield, highest_price FROM account_positions_audit WHERE symbol = ?", (symbol,))
+                    # 3. Shield 및 최고가 조회 (방금 업데이트된 내용 포함)
+                    cur.execute("SELECT manual_shield, peak_price FROM account_positions_audit WHERE symbol = ?", (symbol,))
                     row = cur.fetchone()
                     if row:
-                        manual_shield = int(row['manual_shield']) if row['manual_shield'] else None
-                        highest_price = int(row['highest_price']) if row['highest_price'] else 0
+                        manual_shield = int(row['manual_shield']) if row['manual_shield'] is not None else None
+                        highest_price = int(row['peak_price']) if row['peak_price'] else 0
                     
-                    if not manual_shield:
+                    if manual_shield is None:
                         # 계획 테이블(trade_plan)에서 기본 stop_price 조회
                         cur.execute("SELECT stop_price FROM trade_plan WHERE code = ? ORDER BY date DESC LIMIT 1", (symbol,))
                         row = cur.fetchone()
@@ -230,11 +256,15 @@ async def get_account_summary():
                 except Exception as db_e:
                     print(f"Database query error for {symbol}: {db_e}")
                 
-                avg_price = float(item.get('pchs_avg_pric', 0) or 0)
-                curr_price = int(item.get('prpr', 0) or 0)
-                
-                # Shield 결정: DB 값이 최우선
-                sl = manual_shield if manual_shield else int(avg_price * 0.95)
+                # Shield 결정: 수동설정(manual_shield)이 최우선, 없으면 고점 대비 -5% 트레일링 적용
+                trailing_shield = adjust_to_tick(int(highest_price * 0.95), 'down') if highest_price > 0 else int(avg_price * 0.95)
+                sl = manual_shield if manual_shield is not None else trailing_shield
+
+                # [v22.4] trade_plan의 stop_price는 manual_shield도 trailing_shield도 없을 때만 참고
+                if manual_shield is None and highest_price <= avg_price:
+                    cur.execute("SELECT stop_price FROM trade_plan WHERE code = ? ORDER BY date DESC LIMIT 1", (symbol,))
+                    tp_row = cur.fetchone()
+                    if tp_row and tp_row[0] > sl: sl = int(tp_row[0])
 
                 positions.append({
                     "symbol": symbol, "name": item.get('prdt_name'), "quantity": qty,
@@ -247,6 +277,10 @@ async def get_account_summary():
                     "vitalityScore": int(rs_score), "rsTrend": 'rising' if rs_score >= 80 else 'flat',
                     "entryDate": datetime.now().strftime('%Y-%m-%d')
                 })
+            
+            # 3. 수량이 0인 종목 정리
+            cur.execute("DELETE FROM account_positions_audit WHERE qty <= 0")
+            conn.commit()
             conn.close()
         except Exception as conn_e:
             print(f"Database connection error: {conn_e}")
@@ -330,6 +364,70 @@ async def get_account_summary():
         }
     except Exception as e:
         return {"error": str(e)}
+
+from src.kis_api import place_order_cash, get_current_price_async
+from src.utils.notifier import notifier
+
+class SmartSellRequest(BaseModel):
+    symbol: str
+    quantity: int
+    name: str
+
+@router.post("/order/smart-sell")
+async def execute_smart_sell(req: SmartSellRequest):
+    """거장들의 원칙을 적용한 정밀 지정가 매도 (Smart Exit v2)"""
+    try:
+        # 1. 실시간 현재가 조회
+        curr_price = await get_current_price_async(req.symbol)
+        if not curr_price:
+            return {"status": "error", "message": "현재가를 가져올 수 없습니다."}
+        
+        # 2. [Quant Exit Logic] 현재가 + 0.3% 타겟팅 (통계적 최적 체결가)
+        # 소액주의 경우 변동성이 크므로 0.3%가 적당하며, 대형주는 0.1~0.2%가 적당함
+        raw_target = curr_price * 1.003
+        
+        # 3. 호가 단위(Tick) 및 라운드 피겨 보정
+        # 미너비니의 '호가창 심리'를 반영하여 체결 가능성이 높은 호가로 조정
+        target_sell_price = adjust_to_tick(int(raw_target), 'up')
+        
+        # 만약 계산된 가격이 현재가와 같다면 강제로 1호가 위로 올림
+        if target_sell_price <= curr_price:
+            tick = 1
+            if curr_price >= 2000: tick = 5
+            if curr_price >= 5000: tick = 10
+            if curr_price >= 20000: tick = 50
+            if curr_price >= 50000: tick = 100
+            target_sell_price += tick
+
+        # 4. 주문 실행
+        res = await place_order_cash(req.symbol, qty=req.quantity, price=target_sell_price, side="SELL", ord_dvsn="00")
+        
+        if res and res.get('rt_cd') == '0':
+            # 절감액 계산 (시장가 대비 이득 본 금액)
+            savings = (target_sell_price - curr_price) * req.quantity
+            msg = f"📉 [Smart Exit v2] {req.name}\n현 시세보다 {target_sell_price - curr_price:,}원 위인 {target_sell_price:,}원에 주문을 넣었습니다. (체결 시 약 {savings:,}원 절감)"
+            notifier.send_message(msg)
+            return {"status": "success", "message": f"{target_sell_price:,}원 스마트 매도 예약! (시장가 대비 +{savings:,}원 이득)"}
+        else:
+            return {"status": "error", "message": f"주문 실패: {res.get('msg1')}"}
+            
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/order/market-sell")
+async def execute_market_sell(req: SmartSellRequest):
+    """즉시 시장가 매도 실행 (Emergency Exit)"""
+    try:
+        # 시장가 주문 (ord_dvsn="01")
+        res = await place_order_cash(req.symbol, qty=req.quantity, price=0, side="SELL", ord_dvsn="01")
+        
+        if res and res.get('rt_cd') == '0':
+            notifier.send_message(f"🚨 [Emergency Exit] {req.name} 모든 물량을 시장가로 즉시 정리했습니다.")
+            return {"status": "success", "message": f"{req.name} 시장가 매도 완료!"}
+        else:
+            return {"status": "error", "message": f"주문 실패: {res.get('msg1')}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @router.post("/account/shield")
 async def update_manual_shield(data: ShieldUpdate):

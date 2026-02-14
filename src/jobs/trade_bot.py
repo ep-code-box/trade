@@ -5,6 +5,7 @@ import requests
 import sqlite3
 from datetime import datetime
 from src.db import get_connection
+from src.account import get_account_balance, sync_account_positions
 from src.kis_api import kis_get_raw_async, kis_post_async
 from src.auth import MODE, load_config_from_db, APP_KEY, APP_SECRET, BASE_URL
 from src.utils.notifier import notifier
@@ -19,8 +20,10 @@ class TradeBot:
         self.acnt_prdt_cd = "01"
 
     async def get_current_price(self, symbol):
+        # [v16.10] 실시간 체결가 조회를 위해 TR_ID 명시 (FHKST01010100)
         res = await kis_get_raw_async("/uapi/domestic-stock/v1/quotations/inquire-price", 
-                                     params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol})
+                                     params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
+                                     tr_id="FHKST01010100")
         if res and res.get('rt_cd') == '0':
             return int(res['output']['stck_prpr'])
         return None
@@ -72,25 +75,52 @@ class TradeBot:
 
     async def monitor_and_trade(self):
         print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙️ 감시 중 (안전모드:{SAFETY_MODE})")
+        
+        # [v22.1] 매도 후 자동 감시 해제: KIS 실잔고와 DB 동기화 강제 실행
+        sync_account_positions()
+
+        # [v16.8] 중복 매수 방지: 현재 보유 종목 리스트 확보
+        positions = await self.get_positions()
+        owned_symbols = [p['pdno'] for p in positions]
+
         conn = get_connection()
         cur = conn.cursor()
         
-        # 1. 매수 감시
+        # 1. 매수 감시 (장바구니 또는 trade_plan에서 MONITORING 인 종목)
+        # [v16.4] 통합 매수 감시: 경로와 상관없이 MONITORING 상태면 사격 준비
         cur.execute("""
-            SELECT b.symbol, b.name, t.entry_price 
-            FROM basket b
-            JOIN trade_plan t ON b.symbol = t.code
-            WHERE t.date = (SELECT MAX(date) FROM trade_plan)
+            SELECT DISTINCT code, name, entry_price 
+            FROM trade_plan 
+            WHERE status = 'MONITORING'
+            AND date = (SELECT MAX(date) FROM trade_plan)
         """)
         for symbol, name, target_price in cur.fetchall():
+            if symbol in owned_symbols:
+                continue # 이미 보유 중이면 패스
+                
             curr = await self.get_current_price(symbol)
+            print(f"   [Checking] {name}({symbol}): Curr={curr}, Target={target_price}")
             if curr and curr >= target_price:
                 print(f"🎯 [매수 신호] {name}({symbol}) 돌파! {curr} >= {target_price}")
-                res = await self.execute_order(symbol, "BUY")
+                
+                # [v16.6] 자산 기반 수량 계산 (10% Rule)
+                qty = 1
+                try:
+                    from src.account import get_account_balance
+                    balance = get_account_balance()
+                    if balance and 'summary' in balance:
+                        total_asset = balance['summary']['total_asset']
+                        # 한 종목당 총 자산의 10% 배정
+                        qty = max(1, int((total_asset * 0.1) / curr))
+                except: pass
+
+                res = await self.execute_order(symbol, "BUY", qty=qty)
                 if res and res.get('rt_cd') == '0':
                     prefix = "⚠️ <b>[매수 알림 (안전모드)]</b>" if SAFETY_MODE else "🚀 <b>[자동 매수 완료]</b>"
-                    notifier.send_message(f"{prefix}\n종목: {name}({symbol})\n가격: {curr:,}원\n목표가: {target_price:,}원")
+                    notifier.send_message(f"{prefix}\n종목: {name}({symbol})\n가격: {curr:,}원\n수량: {qty:,}주\n목표가: {target_price:,}원")
                     if not SAFETY_MODE:
+                        # 매수 완료 후 상태 변경 (중복 매수 방지)
+                        conn.execute("UPDATE trade_plan SET status = 'ORDERED' WHERE code = ? AND status = 'MONITORING'", (symbol,))
                         conn.execute("DELETE FROM basket WHERE symbol = ?", (symbol,))
                         conn.commit()
 
@@ -107,27 +137,31 @@ class TradeBot:
             cur.execute("SELECT track FROM trade_plan WHERE code = ? ORDER BY date DESC LIMIT 1", (symbol,))
             tp_row = cur.fetchone()
             
-            if not tp_row:
-                continue # 시스템 추천 이력이 없으면 건드리지 않음
+            # [v16.3] 시스템 추천 이력이 없더라도 account_positions_audit에 있으면 감시 대상 포함
+            cur.execute("SELECT manual_shield, highest_price, peak_price FROM account_positions_audit WHERE symbol = ?", (symbol,))
+            audit_row = cur.fetchone()
+
+            if not tp_row and not audit_row:
+                continue 
             
-            track = tp_row[0].upper()
+            track = tp_row[0].upper() if tp_row else "MANUAL"
             if 'TRACK2' in track:
                 continue # 트랙 2 (배당주)는 자동 매도에서 제외
 
-            cur.execute("SELECT manual_shield, highest_price FROM account_positions_audit WHERE symbol = ?", (symbol,))
-            row = cur.fetchone()
-            manual_shield = row[0] if row else 0
-            highest_price = row[1] if row else curr
+            manual_shield = audit_row[0] if audit_row else 0
+            # highest_price와 peak_price 혼용 대응
+            highest_price = max(audit_row[1] or 0, audit_row[2] or 0, curr)
             
             if curr > highest_price:
                 highest_price = curr
+                # 트레일링 스탑: 최고점 대비 -5%
                 new_shield = int(highest_price * 0.95)
                 if new_shield > manual_shield:
                     manual_shield = new_shield
                     cur.execute("""
-                        INSERT OR REPLACE INTO account_positions_audit (symbol, manual_shield, highest_price, updated_at)
-                        VALUES (?, ?, ?, datetime('now', 'localtime'))
-                    """, (symbol, manual_shield, highest_price))
+                        INSERT OR REPLACE INTO account_positions_audit (symbol, manual_shield, highest_price, peak_price, updated_at)
+                        VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+                    """, (symbol, manual_shield, highest_price, highest_price))
                     conn.commit()
                     print(f"📈 [Shield 상향] {name}: {manual_shield:,}원")
 

@@ -74,26 +74,39 @@ def get_ai_analysis(code: str, persona: str = "LIVERMORE"):
             }
         }
 
-        # Google Gemini 호출
+        # [v25.41] Ultra-Cold Quantitative Audit Prompt
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-3-flash-preview')
         
         prompt = f"""
-당신은 전설적인 사냥꾼이자 퀀트 멘토입니다. '현금도 포지션'임을 명심하십시오.
-다음 데이터를 보고 '테니스 공(주도주)'인지 '달걀(약세주)'인지 판별하십시오.
+당신은 감정이 없는 전문 퀀트 감사관입니다. 
+제시된 데이터를 Mark Minervini, William O'Neil, Jesse Livermore의 기술적 원칙에 의거하여 '객관적 팩트'만으로 분석하십시오.
 
-[분석 대상]
+[데이터 데이터]
 {json.dumps(evidence, ensure_ascii=False, indent=2)}
 
-[사냥 원칙]
-1. 완벽한 구조(VCP 수축 및 정배열)가 아니면 무조건 [SKIP] 혹은 [READY] 하십시오.
-2. 맹목적인 BUY는 금지입니다. 손익비가 안 나오면 가차 없이 버리십시오.
-3. 리포트는 마크다운으로 가독성 있게 작성하십시오.
+[분석 필수 요건]
+1. Minervini (Stage 2 & VCP): MA 정렬 상태와 변동성 수축 수치를 기술적으로 평가.
+2. O'Neil (RS & Supply): RS Score의 백분위 위치와 VDU(Volume Dry-up) 발생 여부 진단.
+3. Livermore (Pivot & Price Action): 피벗 포인트 설정 및 돌파 확률 계산.
 
-[판결 선택지]
-- BUY: 지금 당장 방아쇠를 당겨야 하는 통계적 필연의 구간
-- READY: 주도주이나 아직 베이스 형성 중. 피벗 가격 돌파를 기다려야 함
-- SKIP: 구조가 깨졌거나 달걀에 불과함. 관심종목에서 삭제
+[절대 금지 사항]
+- '사냥', '숲', '방아쇠', '총알', '짐승', '테니스 공', '달걀', '멘토', '조급함' 등 모든 비유적/감성적 표현 금지.
+- 구어체(~하네, ~하게, ~군) 절대 금지. 문어체(~함, ~임, ~함) 혹은 전문 용어만 사용.
+- 개인적인 조언이나 훈수 금지.
+
+[보고서 양식]
+# [QUANT AUDIT] {row[0]}
+## 1. FINAL VERDICT: [BUY / WATCH / SKIP 중 선택]
+## 2. TECHNICAL STRUCTURE
+- Trend Stage: 
+- VCP Status: 
+- RS Alpha: 
+## 3. KEY LEVELS
+- Entry Pivot: 
+- Survival Shield: 
+## 4. RISK/REWARD ANALYSIS
+(여기에 기술적 근거만 3~4줄 요약)
 """
         response = model.generate_content(prompt)
         analysis_result = response.text

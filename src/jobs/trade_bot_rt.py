@@ -9,7 +9,7 @@ from src.db import get_connection
 from src.auth import APP_KEY, APP_SECRET, MODE, get_websocket_approval_key, get_access_token, load_config_from_db
 from src.kis_api import place_order_cash
 from src.utils.notifier import notifier
-from src.account import get_account_balance
+from src.account import get_account_balance, sync_account_positions
 from src.analysis.screen_market import adjust_to_tick
 
 # 프로젝트 루트 경로 추가
@@ -30,6 +30,17 @@ class RealTimeTradeBot:
     async def update_monitoring_list(self):
         """DB에서 감시 대상을 최신화 (매 1분마다 자동 호출)"""
         try:
+            # [v22.1] 매도 후 자동 감시 해제: KIS 실잔고와 DB 동기화 강제 실행
+            sync_account_positions()
+
+            # [v16.9] 중복 매수 방지: 현재 보유 종목 리스트 확보
+            owned_symbols = []
+            try:
+                balance = get_account_balance()
+                if balance and 'holdings' in balance:
+                    owned_symbols = [h['code'] for h in balance['holdings']]
+            except: pass
+
             conn = get_connection()
             cur = conn.cursor()
             
@@ -40,7 +51,10 @@ class RealTimeTradeBot:
                 WHERE status = 'MONITORING'
                 AND date = (SELECT MAX(date) FROM trade_plan)
             """)
-            self.managed_basket = {row[0]: {"name": row[1], "target": row[2], "stop": row[3]} for row in cur.fetchall()}
+            self.managed_basket = {}
+            for row in cur.fetchall():
+                if row[0] not in owned_symbols:
+                    self.managed_basket[row[0]] = {"name": row[1], "target": row[2], "stop": row[3]}
 
             # 2. 매도 감시 (보유 종목 및 트레일링 스탑)
             cur.execute("SELECT symbol, manual_shield, peak_price, entry_price FROM account_positions_audit WHERE qty > 0")
@@ -48,7 +62,7 @@ class RealTimeTradeBot:
             for row in cur.fetchall():
                 symbol, shield, peak, entry = row
                 new_positions[symbol] = {
-                    "shield": shield or int(entry * 0.93),
+                    "shield": shield if shield is not None else int(entry * 0.93),
                     "peak": max(peak or 0, entry or 0),
                     "entry": entry or 0,
                     "name": symbol 
@@ -133,7 +147,14 @@ class RealTimeTradeBot:
                     new_shield = adjust_to_tick(int(curr_price * 0.95), 'down')
                     if new_shield > pos['shield']:
                         pos['shield'] = new_shield
-                        conn = get_connection(); conn.execute("UPDATE account_positions_audit SET manual_shield=?, peak_price=?, updated_at=datetime('now','localtime') WHERE symbol=?", (new_shield, curr_price, symbol)); conn.commit(); conn.close()
+                        conn = get_connection()
+                        conn.execute("""
+                            UPDATE account_positions_audit 
+                            SET manual_shield=?, peak_price=?, highest_price=?, updated_at=datetime('now','localtime') 
+                            WHERE symbol=?
+                        """, (new_shield, curr_price, curr_price, symbol))
+                        conn.commit()
+                        conn.close()
                         print(f"📈 [SHIELD UP] {symbol} -> {new_shield:,}")
 
             if curr_price <= pos['shield']:
@@ -155,8 +176,15 @@ class RealTimeTradeBot:
                             await asyncio.sleep(60)
                             old = self.managed_symbols.copy()
                             new = await self.update_monitoring_list()
+                            
+                            # 신규 종목 구독
                             for s in (new - old):
                                 await websocket.send(json.dumps({"header":{"approval_key":self.approval_key,"custtype":"P","tr_type":"1","content-type":"utf-8"},"body":{"input":{"tr_id":"H0STCNT0","tr_key":s}}}))
+                            
+                            # 제거된 종목 구독 해지 (tr_type='2')
+                            for s in (old - new):
+                                await websocket.send(json.dumps({"header":{"approval_key":self.approval_key,"custtype":"P","tr_type":"2","content-type":"utf-8"},"body":{"input":{"tr_id":"H0STCNT0","tr_key":s}}}))
+                                print(f"📴 [UNSUB] {s} 감시 중단")
                     
                     asyncio.create_task(update_loop())
                     async for msg in websocket:

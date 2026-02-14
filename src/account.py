@@ -129,6 +129,49 @@ def parse_balance(data, stop_prices):
     summary["total_floating_profit"] = total_floating_profit
     return {"summary": summary, "holdings": holdings}
 
+def sync_account_positions():
+    """KIS 실잔고를 DB(account_positions_audit)에 동기화. (매도 시 감시 해제용)"""
+    balance = get_account_balance()
+    if not balance: return
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        # 1. DB의 모든 종목 수량 0으로 초기화 (잔고에 없는 종목 제거용)
+        cur.execute("UPDATE account_positions_audit SET qty = 0")
+        
+        for h in balance['holdings']:
+            symbol = h['code']
+            qty = h['qty']
+            curr_price = h['curr_price']
+            avg_price = h['buy_price']
+
+            # 2. DB에 존재여부 확인 및 업데이트
+            cur.execute("SELECT symbol, peak_price FROM account_positions_audit WHERE symbol = ?", (symbol,))
+            row = cur.fetchone()
+            if row:
+                peak = max(row[1] or 0, curr_price)
+                cur.execute("""
+                    UPDATE account_positions_audit 
+                    SET qty = ?, peak_price = ?, updated_at = datetime('now', 'localtime') 
+                    WHERE symbol = ?
+                """, (qty, peak, symbol))
+            else:
+                # 신규 종목 (수동 매수 등)
+                cur.execute("""
+                    INSERT INTO account_positions_audit (symbol, entry_price, peak_price, qty, manual_shield, updated_at)
+                    VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+                """, (symbol, avg_price, curr_price, qty, int(avg_price * 0.95)))
+        
+        # 3. 수량이 0인 종목 정리 (매도된 종목 삭제)
+        cur.execute("DELETE FROM account_positions_audit WHERE qty <= 0")
+        conn.commit()
+        conn.close()
+        print(f"✅ [Sync] Account positions synchronized with KIS.")
+    except Exception as e:
+        print(f"❌ [Sync] Error during account synchronization: {e}")
+
 def print_account_info():
     """CLI 출력용 함수 (스승님의 생존 전략 반영)."""
     result = get_account_balance()

@@ -85,7 +85,11 @@ async def main_async():
     conn = get_connection()
     # [v16.0] 지능형 수집: 기존 데이터를 지우지 않고, 없는 종목만 타겟팅
     stocks = pd.read_sql_query("SELECT code, name FROM master_info WHERE LENGTH(code) IN (4, 6)", conn)
-    stocks = pd.concat([stocks, pd.DataFrame([{"code":"0001","name":"KOSPI"},{"code":"1001","name":"KOSDAQ"}])]).drop_duplicates(subset=["code"])
+    
+    # [v16.2] 보유 종목 강제 추가: 트랙 외 종목도 RS 계산이 가능하도록 수집 대상에 포함
+    audit_stocks = pd.read_sql_query("SELECT symbol as code, symbol as name FROM account_positions_audit WHERE qty > 0", conn)
+    stocks = pd.concat([stocks, audit_stocks, pd.DataFrame([{"code":"0001","name":"KOSPI"},{"code":"1001","name":"KOSDAQ"}])]).drop_duplicates(subset=["code"])
+    
     df_status = pd.read_sql_query(f"SELECT code FROM daily_analysis WHERE date = '{today_str}'", conn)
     conn.close()
     
